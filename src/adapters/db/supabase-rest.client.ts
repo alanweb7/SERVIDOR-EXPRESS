@@ -60,11 +60,11 @@ export class SupabaseRestClient {
     return Array.isArray(body) ? body : [];
   }
 
-  private headers(): HeadersInit {
+  private headers(): Record<string, string> {
     return {
       "Content-Type": "application/json",
       apikey: this.serviceRoleKey,
-      Authorization: `Bearer ${this.serviceRoleKey}`
+      Authorization: `Bearer ${this.serviceRoleKey}`,
     };
   }
 
