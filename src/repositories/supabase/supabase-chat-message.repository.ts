@@ -30,19 +30,36 @@ export class SupabaseChatMessageRepository implements ChatMessageRepository {
     });
 
     const rows = (await this.client.select("chat_messages", params)) as MessageRow[];
-    return rows
-      .reverse()
-      .map((row) => ({
-        id: row.id,
-        conversationId: row.conversation_id,
-        unitId: row.unit_id,
-        senderName: row.sender_name,
-        content: row.content,
-        isMe: row.is_me,
-        messageType: row.message_type,
-        remoteId: row.remote_id ?? undefined,
-        createdAt: new Date(row.created_at)
-      }));
+    return rows.reverse().map((row) => this.mapRow(row));
+  }
+
+  async findById(messageId: string, conversationId: string, unitId: string): Promise<ChatMessage | null> {
+    const params = new URLSearchParams({
+      select: "id,conversation_id,unit_id,sender_name,content,is_me,message_type,remote_id,created_at",
+      id: `eq.${messageId}`,
+      conversation_id: `eq.${conversationId}`,
+      unit_id: `eq.${unitId}`,
+      limit: "1"
+    });
+
+    const rows = (await this.client.select("chat_messages", params)) as MessageRow[];
+    const row = rows[0];
+    return row ? this.mapRow(row) : null;
+  }
+
+  async findByRemoteId(conversationId: string, unitId: string, remoteId: string): Promise<ChatMessage | null> {
+    const params = new URLSearchParams({
+      select: "id,conversation_id,unit_id,sender_name,content,is_me,message_type,remote_id,created_at",
+      conversation_id: `eq.${conversationId}`,
+      unit_id: `eq.${unitId}`,
+      remote_id: `eq.${remoteId}`,
+      order: "created_at.desc",
+      limit: "1"
+    });
+
+    const rows = (await this.client.select("chat_messages", params)) as MessageRow[];
+    const row = rows[0];
+    return row ? this.mapRow(row) : null;
   }
 
   async create(input: CreateChatMessageInput): Promise<ChatMessage> {
@@ -61,6 +78,10 @@ export class SupabaseChatMessageRepository implements ChatMessageRepository {
       throw new Error("Supabase insert returned empty result for chat_messages");
     }
 
+    return this.mapRow(row);
+  }
+
+  private mapRow(row: MessageRow): ChatMessage {
     return {
       id: row.id,
       conversationId: row.conversation_id,

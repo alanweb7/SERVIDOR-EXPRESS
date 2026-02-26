@@ -5,9 +5,13 @@ export type GenerateAiReplyInput = {
   conversationId: string;
   unitId: string;
   userText: string;
+  source: string;
+  senderName: string;
   contextMessages: ChatMessage[];
 };
 
 export interface AiResponder {
+  readonly providerName: string;
+  readonly isFallback: boolean;
   generateReply(input: GenerateAiReplyInput): Promise<string>;
 }

@@ -18,6 +18,7 @@ import { SupabaseAiInboxRepository } from "./repositories/supabase/supabase-ai-i
 import { SupabaseChatConversationRepository } from "./repositories/supabase/supabase-chat-conversation.repository.js";
 import { SupabaseChatMessageRepository } from "./repositories/supabase/supabase-chat-message.repository.js";
 import { MockAiResponder } from "./adapters/ai/mock-ai.responder.js";
+import { OpenAiAiResponder } from "./adapters/ai/openai-ai.responder.js";
 import { SupabaseRestClient } from "./adapters/db/supabase-rest.client.js";
 import { attachCorrelationContext } from "./middlewares/correlation.js";
 import type { MessageDedupRepository } from "./repositories/interfaces/message-dedup.repository.js";
@@ -58,6 +59,12 @@ export function createApp(partialDeps?: Partial<AppDeps>): FastifyInstance {
     ? new SupabaseRestClient(env.SUPABASE_URL as string, env.SUPABASE_SERVICE_ROLE_KEY as string)
     : null;
 
+  const aiResponder = partialDeps?.aiResponder ?? createAiResponder();
+  app.log.info(
+    { provider: aiResponder.providerName, fallback: aiResponder.isFallback },
+    "AI responder configured"
+  );
+
   app.decorate("deps", {
     dedupRepository: partialDeps?.dedupRepository ?? new InMemoryMessageDedupRepository(),
     queuePublisher: partialDeps?.queuePublisher ?? new MockQueuePublisher(),
@@ -75,7 +82,7 @@ export function createApp(partialDeps?: Partial<AppDeps>): FastifyInstance {
       (supabaseClient
         ? new SupabaseChatMessageRepository(supabaseClient)
         : new InMemoryChatMessageRepository()),
-    aiResponder: partialDeps?.aiResponder ?? new MockAiResponder()
+    aiResponder
   });
 
   app.addHook("onRequest", attachCorrelationContext);
@@ -133,5 +140,23 @@ export function createApp(partialDeps?: Partial<AppDeps>): FastifyInstance {
   });
 
   return app;
+}
+
+function createAiResponder(): AiResponder {
+  if (env.AI_PROVIDER === "mock") {
+    return new MockAiResponder();
+  }
+
+  if (!env.AI_PROVIDER_API_KEY) {
+    throw new Error("AI_PROVIDER_API_KEY is required when AI_PROVIDER=openai");
+  }
+
+  return new OpenAiAiResponder({
+    apiKey: env.AI_PROVIDER_API_KEY,
+    model: env.AI_PROVIDER_MODEL,
+    baseUrl: env.AI_PROVIDER_BASE_URL,
+    timeoutMs: env.AI_REPLY_TIMEOUT_MS,
+    systemPrompt: env.AI_SYSTEM_PROMPT
+  });
 }
 

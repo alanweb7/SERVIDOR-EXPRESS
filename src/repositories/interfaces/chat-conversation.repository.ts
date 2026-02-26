@@ -11,5 +11,5 @@ export type ChatConversation = {
 
 export interface ChatConversationRepository {
   findById(conversationId: string): Promise<ChatConversation | null>;
-  updateAfterAiReply(conversationId: string, content: string): Promise<void>;
+  updateAfterAiReply(conversationId: string, unitId: string, content: string): Promise<void>;
 }

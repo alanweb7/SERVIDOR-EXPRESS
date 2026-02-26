@@ -11,6 +11,12 @@ const envSchema = z.object({
   AI_INTERNAL_TOKEN: z.string().min(1).default("change-me-ai-token"),
   AI_REPLY_TIMEOUT_MS: z.coerce.number().int().positive().default(15000),
   AI_CONTEXT_WINDOW: z.coerce.number().int().positive().default(12),
+  AI_PROVIDER: z.enum(["openai", "mock"]).default("openai"),
+  AI_PROVIDER_MAX_RETRIES: z.coerce.number().int().min(0).max(5).default(1),
+  AI_PROVIDER_BASE_URL: z.string().url().default("https://api.openai.com/v1"),
+  AI_PROVIDER_MODEL: z.string().min(1).default("gpt-4o-mini"),
+  AI_PROVIDER_API_KEY: z.string().optional(),
+  AI_SYSTEM_PROMPT: z.string().optional(),
   DATA_PROVIDER: z.enum(["inmemory", "supabase"]).default("inmemory"),
   SUPABASE_URL: z.string().url().optional(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().optional()

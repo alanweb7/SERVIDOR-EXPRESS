@@ -19,6 +19,18 @@ export class AiReplyController {
     );
 
     const result = await this.aiReplyService.process(payload);
+    request.log.info(
+      {
+        unitId: payload.unit_id,
+        conversationId: payload.conversation_id,
+        messageId: payload.message_id,
+        outputMessageId: result.output_message_id,
+        provider: result.provider_name,
+        fallback: result.fallback_in_use,
+        duplicated: result.duplicated
+      },
+      "AI reply processed"
+    );
     return reply.code(200).send(ok(result));
   }
 }

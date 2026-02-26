@@ -11,7 +11,10 @@ export type AiReplyResult = {
   conversation_id: string;
   input_message_id: string;
   output_message_id: string | null;
+  output_text: string | null;
   agent_name: string;
+  provider_name: string;
+  fallback_in_use: boolean;
 };
 
 export class AiReplyService {
@@ -20,21 +23,18 @@ export class AiReplyService {
     private readonly conversationRepository: ChatConversationRepository,
     private readonly chatMessageRepository: ChatMessageRepository,
     private readonly aiResponder: AiResponder,
-    private readonly contextWindow: number
+    private readonly contextWindow: number,
+    private readonly providerMaxRetries: number
   ) {}
 
   async process(input: AiReplyInput): Promise<AiReplyResult> {
+    const outputRemoteId = this.outputRemoteId(input.conversation_id, input.message_id);
+
     try {
       const existing = await this.aiInboxRepository.find(input.unit_id, input.source, input.message_id);
       if (existing) {
-        return {
-          success: true,
-          duplicated: true,
-          conversation_id: input.conversation_id,
-          input_message_id: input.message_id,
-          output_message_id: existing.outputMessageId ?? null,
-          agent_name: existing.senderName
-        };
+        const duplicatedResult = await this.buildDuplicatedResult(input, existing.senderName, existing.outputMessageId, outputRemoteId);
+        return duplicatedResult;
       }
 
       const conversation = await this.conversationRepository.findById(input.conversation_id);
@@ -55,7 +55,10 @@ export class AiReplyService {
           conversation_id: input.conversation_id,
           input_message_id: input.message_id,
           output_message_id: null,
-          agent_name: agentName
+          output_text: null,
+          agent_name: agentName,
+          provider_name: this.aiResponder.providerName,
+          fallback_in_use: this.aiResponder.isFallback
         };
       }
 
@@ -74,31 +77,53 @@ export class AiReplyService {
         text: input.text
       });
 
+      const inputRemoteId = this.inputRemoteId(input.source, input.message_id);
+      const existingInputMessage = await this.chatMessageRepository.findByRemoteId(
+        input.conversation_id,
+        input.unit_id,
+        inputRemoteId
+      );
+      if (!existingInputMessage) {
+        await this.chatMessageRepository.create({
+          conversationId: input.conversation_id,
+          unitId: input.unit_id,
+          senderName: input.sender_name,
+          content: input.text,
+          isMe: input.source === "internal_panel",
+          messageType: "text",
+          remoteId: inputRemoteId
+        });
+      }
+
       const contextMessages = await this.chatMessageRepository.listRecentByConversation(
         input.conversation_id,
         input.unit_id,
         this.contextWindow
       );
 
-      const aiResponse = await this.aiResponder.generateReply({
+      const aiResponse = await this.generateWithRetry({
         agentName,
         conversationId: input.conversation_id,
         unitId: input.unit_id,
         userText: input.text,
+        source: input.source,
+        senderName: input.sender_name,
         contextMessages
       });
 
-      const output = await this.chatMessageRepository.create({
-        conversationId: input.conversation_id,
-        unitId: input.unit_id,
-        senderName: agentName,
-        content: aiResponse,
-        isMe: false,
-        messageType: "text",
-        remoteId: `ai:${input.conversation_id}:${input.message_id}`
-      });
+      const output =
+        (await this.chatMessageRepository.findByRemoteId(input.conversation_id, input.unit_id, outputRemoteId)) ??
+        (await this.chatMessageRepository.create({
+          conversationId: input.conversation_id,
+          unitId: input.unit_id,
+          senderName: agentName,
+          content: aiResponse,
+          isMe: false,
+          messageType: "text",
+          remoteId: outputRemoteId
+        }));
 
-      await this.conversationRepository.updateAfterAiReply(input.conversation_id, aiResponse);
+      await this.conversationRepository.updateAfterAiReply(input.conversation_id, input.unit_id, aiResponse);
       await this.aiInboxRepository.markDone(input.unit_id, input.source, input.message_id, output.id);
 
       return {
@@ -107,7 +132,10 @@ export class AiReplyService {
         conversation_id: input.conversation_id,
         input_message_id: input.message_id,
         output_message_id: output.id,
-        agent_name: agentName
+        output_text: output.content,
+        agent_name: agentName,
+        provider_name: this.aiResponder.providerName,
+        fallback_in_use: this.aiResponder.isFallback
       };
     } catch (error) {
       if (error instanceof HttpError) {
@@ -119,5 +147,84 @@ export class AiReplyService {
         .catch(() => undefined);
       throw new HttpError(500, "internal_error", "Falha ao gerar resposta da IA", error);
     }
+  }
+
+  private async generateWithRetry(input: {
+    agentName: string;
+    conversationId: string;
+    unitId: string;
+    userText: string;
+    source: string;
+    senderName: string;
+    contextMessages: Awaited<ReturnType<ChatMessageRepository["listRecentByConversation"]>>;
+  }): Promise<string> {
+    const maxAttempts = this.providerMaxRetries + 1;
+    let lastError: unknown;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      try {
+        return await this.aiResponder.generateReply(input);
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    throw new Error(
+      `Provider ${this.aiResponder.providerName} failed after ${maxAttempts} attempts: ${
+        lastError instanceof Error ? lastError.message : "unknown error"
+      }`
+    );
+  }
+
+  private async buildDuplicatedResult(
+    input: AiReplyInput,
+    agentName: string,
+    outputMessageId: string | undefined,
+    outputRemoteId: string
+  ): Promise<AiReplyResult> {
+    let resolvedOutputMessageId = outputMessageId ?? null;
+    let outputText: string | null = null;
+
+    if (resolvedOutputMessageId) {
+      const outputMessage = await this.chatMessageRepository.findById(
+        resolvedOutputMessageId,
+        input.conversation_id,
+        input.unit_id
+      );
+      outputText = outputMessage?.content ?? null;
+    } else {
+      const outputMessage = await this.chatMessageRepository.findByRemoteId(
+        input.conversation_id,
+        input.unit_id,
+        outputRemoteId
+      );
+      if (outputMessage) {
+        resolvedOutputMessageId = outputMessage.id;
+        outputText = outputMessage.content;
+        await this.aiInboxRepository
+          .markDone(input.unit_id, input.source, input.message_id, outputMessage.id)
+          .catch(() => undefined);
+      }
+    }
+
+    return {
+      success: true,
+      duplicated: true,
+      conversation_id: input.conversation_id,
+      input_message_id: input.message_id,
+      output_message_id: resolvedOutputMessageId,
+      output_text: outputText,
+      agent_name: agentName,
+      provider_name: this.aiResponder.providerName,
+      fallback_in_use: this.aiResponder.isFallback
+    };
+  }
+
+  private outputRemoteId(conversationId: string, messageId: string): string {
+    return `ai:${conversationId}:${messageId}`;
+  }
+
+  private inputRemoteId(source: string, messageId: string): string {
+    return `in:${source}:${messageId}`;
   }
 }

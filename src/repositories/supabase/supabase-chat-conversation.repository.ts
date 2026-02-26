@@ -41,11 +41,14 @@ export class SupabaseChatConversationRepository implements ChatConversationRepos
     };
   }
 
-  async updateAfterAiReply(conversationId: string, content: string): Promise<void> {
+  async updateAfterAiReply(conversationId: string, unitId: string, content: string): Promise<void> {
     const current = await this.findById(conversationId);
-    if (!current) return;
+    if (!current || current.unitId !== unitId) return;
 
-    const filters = new URLSearchParams({ id: `eq.${conversationId}` });
+    const filters = new URLSearchParams({
+      id: `eq.${conversationId}`,
+      unit_id: `eq.${unitId}`
+    });
     await this.client.update("chat_conversations", filters, {
       last_message: content,
       unread_count: current.unreadCount + 1,

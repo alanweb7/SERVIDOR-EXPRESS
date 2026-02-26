@@ -37,9 +37,9 @@ export class InMemoryChatConversationRepository implements ChatConversationRepos
     return this.store.get(conversationId) ?? null;
   }
 
-  async updateAfterAiReply(conversationId: string, content: string): Promise<void> {
+  async updateAfterAiReply(conversationId: string, unitId: string, content: string): Promise<void> {
     const current = this.store.get(conversationId);
-    if (!current) return;
+    if (!current || current.unitId !== unitId) return;
 
     this.store.set(conversationId, {
       ...current,

@@ -13,6 +13,16 @@ export class InMemoryChatMessageRepository implements ChatMessageRepository {
     return messages.filter((m) => m.unitId === unitId).slice(Math.max(messages.length - limit, 0));
   }
 
+  async findById(messageId: string, conversationId: string, unitId: string): Promise<ChatMessage | null> {
+    const messages = this.store.get(conversationId) ?? [];
+    return messages.find((message) => message.id === messageId && message.unitId === unitId) ?? null;
+  }
+
+  async findByRemoteId(conversationId: string, unitId: string, remoteId: string): Promise<ChatMessage | null> {
+    const messages = this.store.get(conversationId) ?? [];
+    return messages.find((message) => message.unitId === unitId && message.remoteId === remoteId) ?? null;
+  }
+
   async create(input: CreateChatMessageInput): Promise<ChatMessage> {
     const newMessage: ChatMessage = {
       id: randomUUID(),
