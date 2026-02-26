@@ -10,6 +10,7 @@ export class AiReplyController {
     const payload = aiReplySchema.parse(request.body);
     request.log.info(
       {
+        phase: "auth",
         unitId: payload.unit_id,
         conversationId: payload.conversation_id,
         messageId: payload.message_id,
@@ -18,15 +19,14 @@ export class AiReplyController {
       "AI reply request received"
     );
 
-    const result = await this.aiReplyService.process(payload);
+    const result = await this.aiReplyService.process(payload, request.log, request.id);
     request.log.info(
       {
+        phase: "dispatch_out",
         unitId: payload.unit_id,
         conversationId: payload.conversation_id,
         messageId: payload.message_id,
         outputMessageId: result.output_message_id,
-        provider: result.provider_name,
-        fallback: result.fallback_in_use,
         duplicated: result.duplicated
       },
       "AI reply processed"

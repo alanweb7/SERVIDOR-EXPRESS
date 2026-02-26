@@ -10,9 +10,10 @@ export async function aiRoutes(app: FastifyInstance): Promise<void> {
       app.deps.aiInboxRepository,
       app.deps.chatConversationRepository,
       app.deps.chatMessageRepository,
-      app.deps.aiResponder,
+      app.deps.openClawProvider,
+      app.deps.outboundDispatcher,
       env.AI_CONTEXT_WINDOW,
-      env.AI_PROVIDER_MAX_RETRIES
+      env.AI_TRANSIENT_MAX_RETRIES
     )
   );
 

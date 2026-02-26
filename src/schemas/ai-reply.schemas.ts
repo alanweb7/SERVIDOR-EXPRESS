@@ -4,10 +4,10 @@ export const aiReplySchema = z.object({
   unit_id: z.string().min(1),
   conversation_id: z.string().min(1),
   message_id: z.string().min(1),
-  text: z.string().optional().default(""),
+  text: z.string().min(1),
   sender_name: z.string().min(1),
   source: z.enum(["internal_panel", "external_fastify", "internal_ai"]).default("internal_panel"),
-  timestamp: z.string().datetime().optional(),
+  timestamp: z.string().datetime(),
   metadata: z
     .object({
       channel: z.string().optional(),

@@ -17,8 +17,8 @@ import { InMemoryChatMessageRepository } from "./repositories/in-memory/in-memor
 import { SupabaseAiInboxRepository } from "./repositories/supabase/supabase-ai-inbox.repository.js";
 import { SupabaseChatConversationRepository } from "./repositories/supabase/supabase-chat-conversation.repository.js";
 import { SupabaseChatMessageRepository } from "./repositories/supabase/supabase-chat-message.repository.js";
-import { MockAiResponder } from "./adapters/ai/mock-ai.responder.js";
-import { OpenAiAiResponder } from "./adapters/ai/openai-ai.responder.js";
+import { OpenClawHttpAgentProvider } from "./adapters/agent/openclaw-http-agent.provider.js";
+import { QueueOutboundDispatcher } from "./adapters/outbound/queue-outbound.dispatcher.js";
 import { SupabaseRestClient } from "./adapters/db/supabase-rest.client.js";
 import { attachCorrelationContext } from "./middlewares/correlation.js";
 import type { MessageDedupRepository } from "./repositories/interfaces/message-dedup.repository.js";
@@ -27,7 +27,9 @@ import type { CacheProvider } from "./adapters/cache/cache-provider.js";
 import type { AiInboxRepository } from "./repositories/interfaces/ai-inbox.repository.js";
 import type { ChatConversationRepository } from "./repositories/interfaces/chat-conversation.repository.js";
 import type { ChatMessageRepository } from "./repositories/interfaces/chat-message.repository.js";
-import type { AiResponder } from "./adapters/ai/ai-responder.js";
+import type { OpenClawAgentProvider } from "./adapters/agent/openclaw-agent-provider.js";
+import { OpenClawProviderError } from "./adapters/agent/openclaw-agent-provider.js";
+import type { OutboundDispatcher } from "./adapters/outbound/outbound-dispatcher.js";
 
 export type AppDeps = {
   dedupRepository: MessageDedupRepository;
@@ -36,7 +38,8 @@ export type AppDeps = {
   aiInboxRepository: AiInboxRepository;
   chatConversationRepository: ChatConversationRepository;
   chatMessageRepository: ChatMessageRepository;
-  aiResponder: AiResponder;
+  openClawProvider: OpenClawAgentProvider;
+  outboundDispatcher: OutboundDispatcher;
 };
 
 export function createApp(partialDeps?: Partial<AppDeps>): FastifyInstance {
@@ -58,16 +61,15 @@ export function createApp(partialDeps?: Partial<AppDeps>): FastifyInstance {
   const supabaseClient = useSupabase
     ? new SupabaseRestClient(env.SUPABASE_URL as string, env.SUPABASE_SERVICE_ROLE_KEY as string)
     : null;
+  const queuePublisher = partialDeps?.queuePublisher ?? new MockQueuePublisher();
 
-  const aiResponder = partialDeps?.aiResponder ?? createAiResponder();
-  app.log.info(
-    { provider: aiResponder.providerName, fallback: aiResponder.isFallback },
-    "AI responder configured"
-  );
+  const openClawProvider = partialDeps?.openClawProvider ?? createOpenClawProvider();
+  const outboundDispatcher = partialDeps?.outboundDispatcher ?? new QueueOutboundDispatcher(queuePublisher);
+  app.log.info({ provider: openClawProvider.providerName }, "AI provider configured");
 
   app.decorate("deps", {
     dedupRepository: partialDeps?.dedupRepository ?? new InMemoryMessageDedupRepository(),
-    queuePublisher: partialDeps?.queuePublisher ?? new MockQueuePublisher(),
+    queuePublisher,
     cacheProvider: partialDeps?.cacheProvider ?? new InMemoryCacheProvider(),
     aiInboxRepository:
       partialDeps?.aiInboxRepository ??
@@ -82,7 +84,8 @@ export function createApp(partialDeps?: Partial<AppDeps>): FastifyInstance {
       (supabaseClient
         ? new SupabaseChatMessageRepository(supabaseClient)
         : new InMemoryChatMessageRepository()),
-    aiResponder
+    openClawProvider,
+    outboundDispatcher
   });
 
   app.addHook("onRequest", attachCorrelationContext);
@@ -142,21 +145,21 @@ export function createApp(partialDeps?: Partial<AppDeps>): FastifyInstance {
   return app;
 }
 
-function createAiResponder(): AiResponder {
-  if (env.AI_PROVIDER === "mock") {
-    return new MockAiResponder();
+function createOpenClawProvider(): OpenClawAgentProvider {
+  if (!env.OPENCLAW_BASE_URL || !env.OPENCLAW_GATEWAY_TOKEN || !env.OPENCLAW_AGENT_ID) {
+    return {
+      providerName: "openclaw",
+      async sendMessage() {
+        throw new OpenClawProviderError("openclaw_unavailable", "OpenClaw provider is not configured", false);
+      }
+    };
   }
 
-  if (!env.AI_PROVIDER_API_KEY) {
-    throw new Error("AI_PROVIDER_API_KEY is required when AI_PROVIDER=openai");
-  }
-
-  return new OpenAiAiResponder({
-    apiKey: env.AI_PROVIDER_API_KEY,
-    model: env.AI_PROVIDER_MODEL,
-    baseUrl: env.AI_PROVIDER_BASE_URL,
-    timeoutMs: env.AI_REPLY_TIMEOUT_MS,
-    systemPrompt: env.AI_SYSTEM_PROMPT
+  return new OpenClawHttpAgentProvider({
+    baseUrl: env.OPENCLAW_BASE_URL,
+    gatewayToken: env.OPENCLAW_GATEWAY_TOKEN,
+    agentId: env.OPENCLAW_AGENT_ID,
+    timeoutMs: env.OPENCLAW_TIMEOUT_MS
   });
 }
 

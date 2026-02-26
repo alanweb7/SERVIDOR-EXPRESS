@@ -1,15 +1,21 @@
 # AI Reply Flow (`POST /ai/reply`)
 
 ## Objetivo
-Processar mensagens humanas de conversas IA e persistir a resposta real do agente (LLM) no mesmo thread (`chat_messages`), com anti-loop e idempotencia.
+Orquestrar autenticacao, persistencia e dispatch no backend Fastify, delegando a geracao da resposta exclusivamente ao agente Nolan no OpenClaw.
+
+## Arquitetura
+Evolution API / Chat CRM
+-> Fastify (`/ai/reply` inbound)
+-> OpenClaw (Nolan Neo)
+-> Fastify (persist + dispatch outbound)
+-> Evolution API / Chat CRM
 
 ## Contrato
 - Rotas: `POST /ai/reply` e `POST /api/v1/ai/reply`
 - Auth:
-  - `Authorization: Bearer <AI_INTERNAL_TOKEN>` ou
-  - `x-signature: <WEBHOOK_SIGNING_SECRET>`
+  - `Authorization: Bearer <AI_INTERNAL_TOKEN>`
 
-Body:
+Body obrigatorio:
 ```json
 {
   "unit_id": "uuid",
@@ -24,37 +30,34 @@ Body:
 ```
 
 ## Regras implementadas
-1. Valida isolamento: conversa deve existir e pertencer ao `unit_id`.
-2. Conversa deve ser IA (`is_ai_agent = true`), senao `409`.
-3. Anti-loop:
-   - ignora quando `sender_name == ai_agent_name`
-   - ignora quando `source == internal_ai`
-4. Idempotencia forte em `ai_inbox` por `(unit_id, source, message_id)`.
-5. Rejeita payload sem texto/anexo (`422`).
-6. Isolamento multitenant em todas as leituras/escritas usando `unit_id`.
+1. Isolamento por `unit_id` em todas as consultas e escritas.
+2. Idempotencia por `(unit_id, message_id)` em `ai_inbox`.
+3. Conversa precisa existir em `chat_conversations` e estar marcada como IA.
+4. Sem geracao local/template no caminho principal.
+5. Erros atualizam `ai_inbox` com `status=failed`, `attempts` e `error` sanitizado.
 
 ## Fluxo
-1. Registra inbound em `ai_inbox` com status `received`.
-2. Persiste mensagem de entrada do usuario em `chat_messages` (dedupe por `remote_id`).
-3. Carrega janela de contexto da conversa (`AI_CONTEXT_WINDOW`).
-4. Gera resposta via `AiResponder` (provider configurado).
-5. Persiste resposta em `chat_messages`:
-   - `sender_name = ai_agent_name`
-   - `is_me = false`
-   - `message_type = text`
-   - `remote_id = ai:{conversation_id}:{message_id}`
-6. Atualiza conversa (`last_message`, `unread_count + 1`, `updated_at`).
-7. Marca `ai_inbox` como `done`.
+1. Autentica request interno.
+2. Valida payload e contexto da conversa.
+3. Persiste inbound em `ai_inbox(status=received)` e `chat_messages(is_me=false)`.
+4. Resolve contexto (ultimas `AI_CONTEXT_WINDOW` mensagens).
+5. Chama OpenClaw para gerar a resposta do Nolan.
+6. Persiste outbound em `chat_messages(is_me=true)`.
+7. Atualiza conversa e `ai_inbox(status=processed, output_message_id, attempts)`.
+8. Dispara outbound para o canal via dispatcher (`ai.reply.dispatch`).
 
-## Provider real (Supabase)
-Defina no ambiente:
+## Configuracao obrigatoria
 - `DATA_PROVIDER=supabase`
 - `SUPABASE_URL=https://<project>.supabase.co`
 - `SUPABASE_SERVICE_ROLE_KEY=<service_role>`
-- `AI_PROVIDER=openai`
-- `AI_PROVIDER_API_KEY=<token>`
-- `AI_PROVIDER_MODEL=gpt-4o-mini` (ou outro)
-- `AI_PROVIDER_BASE_URL=https://api.openai.com/v1`
-- `AI_PROVIDER_MAX_RETRIES=1`
+- `OPENCLAW_BASE_URL=<url-openclaw>`
+- `OPENCLAW_GATEWAY_TOKEN=<token-interno>`
+- `OPENCLAW_AGENT_ID=<agent-id-do-nolan>`
+- `OPENCLAW_TIMEOUT_MS=15000`
+- `AI_TRANSIENT_MAX_RETRIES=1`
 
-Com isso, os repositorios reais sao usados no lugar dos `InMemory...`.
+## Observabilidade
+Logs estruturados com:
+- `request_id`, `unit_id`, `conversation_id`, `message_id`
+- `provider=openclaw`
+- `phase` em `auth|validate|persist_in|resolve_context|openclaw_call|persist_out|dispatch_out`

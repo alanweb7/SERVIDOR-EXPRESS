@@ -1,9 +1,25 @@
-import type { AiResponder } from "../adapters/ai/ai-responder.js";
+import { type OpenClawAgentProvider, OpenClawProviderError } from "../adapters/agent/openclaw-agent-provider.js";
+import { DispatchOutboundError, type OutboundDispatcher } from "../adapters/outbound/outbound-dispatcher.js";
 import type { AiReplyInput } from "../schemas/ai-reply.schemas.js";
 import { HttpError } from "../utils/http-error.js";
 import type { AiInboxRepository } from "../repositories/interfaces/ai-inbox.repository.js";
 import type { ChatConversationRepository } from "../repositories/interfaces/chat-conversation.repository.js";
 import type { ChatMessageRepository } from "../repositories/interfaces/chat-message.repository.js";
+
+type Phase =
+  | "auth"
+  | "validate"
+  | "persist_in"
+  | "resolve_context"
+  | "openclaw_call"
+  | "persist_out"
+  | "dispatch_out";
+
+type LoggerLike = {
+  info(data: Record<string, unknown>, message: string): void;
+  warn(data: Record<string, unknown>, message: string): void;
+  error(data: Record<string, unknown>, message: string): void;
+};
 
 export type AiReplyResult = {
   success: true;
@@ -11,10 +27,7 @@ export type AiReplyResult = {
   conversation_id: string;
   input_message_id: string;
   output_message_id: string | null;
-  output_text: string | null;
   agent_name: string;
-  provider_name: string;
-  fallback_in_use: boolean;
 };
 
 export class AiReplyService {
@@ -22,52 +35,48 @@ export class AiReplyService {
     private readonly aiInboxRepository: AiInboxRepository,
     private readonly conversationRepository: ChatConversationRepository,
     private readonly chatMessageRepository: ChatMessageRepository,
-    private readonly aiResponder: AiResponder,
+    private readonly openClawProvider: OpenClawAgentProvider,
+    private readonly outboundDispatcher: OutboundDispatcher,
     private readonly contextWindow: number,
-    private readonly providerMaxRetries: number
+    private readonly transientMaxRetries: number
   ) {}
 
-  async process(input: AiReplyInput): Promise<AiReplyResult> {
+  async process(input: AiReplyInput, logger: LoggerLike, requestId: string): Promise<AiReplyResult> {
     const outputRemoteId = this.outputRemoteId(input.conversation_id, input.message_id);
+    let currentPhase: Phase = "validate";
+    const logBase = {
+      request_id: requestId,
+      unit_id: input.unit_id,
+      conversation_id: input.conversation_id,
+      message_id: input.message_id,
+      provider: this.openClawProvider.providerName
+    };
 
-    try {
-      const existing = await this.aiInboxRepository.find(input.unit_id, input.source, input.message_id);
-      if (existing) {
-        const duplicatedResult = await this.buildDuplicatedResult(input, existing.senderName, existing.outputMessageId, outputRemoteId);
-        return duplicatedResult;
-      }
+    logger.info({ ...logBase, phase: currentPhase }, "AI reply validation complete");
 
-      const conversation = await this.conversationRepository.findById(input.conversation_id);
-      if (!conversation || conversation.unitId !== input.unit_id) {
-        throw new HttpError(404, "conversation_not_found", "Conversa nao encontrada");
-      }
+    const existing = await this.aiInboxRepository.find(input.unit_id, input.message_id);
+    if (existing?.status === "processed") {
+      logger.info({ ...logBase, phase: "persist_in" satisfies Phase }, "Inbound already processed");
+      return {
+        success: true,
+        duplicated: true,
+        conversation_id: input.conversation_id,
+        input_message_id: input.message_id,
+        output_message_id: existing.outputMessageId ?? null,
+        agent_name: "Nolan Neo"
+      };
+    }
 
-      if (!conversation.isAiAgent) {
-        throw new HttpError(409, "not_ai_conversation", "Conversa nao esta marcada como IA");
-      }
+    const conversation = await this.conversationRepository.findById(input.conversation_id);
+    if (!conversation || conversation.unitId !== input.unit_id) {
+      throw new HttpError(404, "conversation_not_found", "Conversa nao encontrada");
+    }
 
-      const agentName = conversation.aiAgentName || "Nolan Neo";
+    if (!conversation.isAiAgent) {
+      throw new HttpError(409, "not_ai_conversation", "Conversa nao esta marcada como IA");
+    }
 
-      if (input.sender_name === agentName || input.source === "internal_ai") {
-        return {
-          success: true,
-          duplicated: false,
-          conversation_id: input.conversation_id,
-          input_message_id: input.message_id,
-          output_message_id: null,
-          output_text: null,
-          agent_name: agentName,
-          provider_name: this.aiResponder.providerName,
-          fallback_in_use: this.aiResponder.isFallback
-        };
-      }
-
-      const hasText = input.text.trim().length > 0;
-      const attachments = input.metadata?.attachments ?? [];
-      if (!hasText && attachments.length === 0) {
-        throw new HttpError(422, "invalid_payload", "Mensagem sem texto ou anexo processavel");
-      }
-
+    if (!existing) {
       await this.aiInboxRepository.createReceived({
         unitId: input.unit_id,
         source: input.source,
@@ -76,55 +85,70 @@ export class AiReplyService {
         senderName: input.sender_name,
         text: input.text
       });
+    }
 
-      const inputRemoteId = this.inputRemoteId(input.source, input.message_id);
-      const existingInputMessage = await this.chatMessageRepository.findByRemoteId(
-        input.conversation_id,
-        input.unit_id,
-        inputRemoteId
-      );
-      if (!existingInputMessage) {
-        await this.chatMessageRepository.create({
-          conversationId: input.conversation_id,
-          unitId: input.unit_id,
-          senderName: input.sender_name,
-          content: input.text,
-          isMe: input.source === "internal_panel",
-          messageType: "text",
-          remoteId: inputRemoteId
-        });
-      }
+    try {
+      currentPhase = "persist_in";
+      logger.info({ ...logBase, phase: currentPhase }, "Persisting inbound message");
+      await this.persistInboundIfNeeded(input);
 
+      currentPhase = "resolve_context";
+      logger.info({ ...logBase, phase: currentPhase }, "Loading conversation context");
       const contextMessages = await this.chatMessageRepository.listRecentByConversation(
         input.conversation_id,
         input.unit_id,
         this.contextWindow
       );
 
-      const aiResponse = await this.generateWithRetry({
-        agentName,
-        conversationId: input.conversation_id,
-        unitId: input.unit_id,
-        userText: input.text,
-        source: input.source,
-        senderName: input.sender_name,
-        contextMessages
-      });
+      currentPhase = "openclaw_call";
+      logger.info({ ...logBase, phase: currentPhase }, "Calling OpenClaw provider");
+      const providerReply = await this.withRetries(
+        () =>
+          this.openClawProvider.sendMessage({
+            unitId: input.unit_id,
+            conversationId: input.conversation_id,
+            senderName: input.sender_name,
+            text: input.text,
+            source: input.source,
+            timestamp: input.timestamp,
+            metadata: input.metadata,
+            history: contextMessages
+          }),
+        (error) => error instanceof OpenClawProviderError && error.retryable
+      );
 
+      currentPhase = "persist_out";
+      logger.info({ ...logBase, phase: currentPhase }, "Persisting outbound message");
       const output =
         (await this.chatMessageRepository.findByRemoteId(input.conversation_id, input.unit_id, outputRemoteId)) ??
         (await this.chatMessageRepository.create({
           conversationId: input.conversation_id,
           unitId: input.unit_id,
-          senderName: agentName,
-          content: aiResponse,
-          isMe: false,
+          senderName: providerReply.agentName,
+          content: providerReply.replyText,
+          isMe: true,
           messageType: "text",
           remoteId: outputRemoteId
         }));
 
-      await this.conversationRepository.updateAfterAiReply(input.conversation_id, input.unit_id, aiResponse);
-      await this.aiInboxRepository.markDone(input.unit_id, input.source, input.message_id, output.id);
+      await this.conversationRepository.updateAfterAiReply(input.conversation_id, input.unit_id, providerReply.replyText);
+      await this.aiInboxRepository.markProcessed(input.unit_id, input.message_id, output.id);
+
+      currentPhase = "dispatch_out";
+      logger.info({ ...logBase, phase: currentPhase }, "Dispatching outbound message");
+      await this.withRetries(
+        () =>
+          this.outboundDispatcher.dispatchReply({
+            unitId: input.unit_id,
+            conversationId: input.conversation_id,
+            inputMessageId: input.message_id,
+            outputMessageId: output.id,
+            source: input.source,
+            text: providerReply.replyText,
+            metadata: input.metadata
+          }),
+        (error) => error instanceof DispatchOutboundError && error.retryable
+      );
 
       return {
         success: true,
@@ -132,92 +156,87 @@ export class AiReplyService {
         conversation_id: input.conversation_id,
         input_message_id: input.message_id,
         output_message_id: output.id,
-        output_text: output.content,
-        agent_name: agentName,
-        provider_name: this.aiResponder.providerName,
-        fallback_in_use: this.aiResponder.isFallback
+        agent_name: providerReply.agentName
       };
     } catch (error) {
+      const sanitized = this.sanitizeError(error);
+      await this.aiInboxRepository.markFailed(input.unit_id, input.message_id, sanitized).catch(() => undefined);
+
+      logger.error(
+        {
+          ...logBase,
+          phase: currentPhase,
+          code: this.errorCode(error),
+          err: error instanceof Error ? error : new Error(String(error))
+        },
+        "AI reply processing failed"
+      );
+
+      if (error instanceof OpenClawProviderError) {
+        throw new HttpError(503, "openclaw_unavailable", "OpenClaw indisponivel", error);
+      }
+      if (error instanceof DispatchOutboundError) {
+        throw new HttpError(502, "dispatch_failed", "Falha no envio da resposta", error);
+      }
       if (error instanceof HttpError) {
         throw error;
       }
-      const message = error instanceof Error ? error.message : "Erro interno";
-      await this.aiInboxRepository
-        .markError(input.unit_id, input.source, input.message_id, message)
-        .catch(() => undefined);
-      throw new HttpError(500, "internal_error", "Falha ao gerar resposta da IA", error);
+
+      throw new HttpError(500, "INTERNAL_SERVER_ERROR", "Erro interno do servidor", error);
     }
   }
 
-  private async generateWithRetry(input: {
-    agentName: string;
-    conversationId: string;
-    unitId: string;
-    userText: string;
-    source: string;
-    senderName: string;
-    contextMessages: Awaited<ReturnType<ChatMessageRepository["listRecentByConversation"]>>;
-  }): Promise<string> {
-    const maxAttempts = this.providerMaxRetries + 1;
+  private async persistInboundIfNeeded(input: AiReplyInput): Promise<void> {
+    const inputRemoteId = this.inputRemoteId(input.source, input.message_id);
+    const existingInputMessage = await this.chatMessageRepository.findByRemoteId(
+      input.conversation_id,
+      input.unit_id,
+      inputRemoteId
+    );
+
+    if (existingInputMessage) {
+      return;
+    }
+
+    await this.chatMessageRepository.create({
+      conversationId: input.conversation_id,
+      unitId: input.unit_id,
+      senderName: input.sender_name,
+      content: input.text,
+      isMe: false,
+      messageType: "text",
+      remoteId: inputRemoteId
+    });
+  }
+
+  private async withRetries<T>(operation: () => Promise<T>, isRetryable: (error: unknown) => boolean): Promise<T> {
+    const maxAttempts = this.transientMaxRetries + 1;
     let lastError: unknown;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       try {
-        return await this.aiResponder.generateReply(input);
+        return await operation();
       } catch (error) {
         lastError = error;
+        if (!isRetryable(error) || attempt >= maxAttempts) {
+          throw error;
+        }
       }
     }
 
-    throw new Error(
-      `Provider ${this.aiResponder.providerName} failed after ${maxAttempts} attempts: ${
-        lastError instanceof Error ? lastError.message : "unknown error"
-      }`
-    );
+    throw lastError;
   }
 
-  private async buildDuplicatedResult(
-    input: AiReplyInput,
-    agentName: string,
-    outputMessageId: string | undefined,
-    outputRemoteId: string
-  ): Promise<AiReplyResult> {
-    let resolvedOutputMessageId = outputMessageId ?? null;
-    let outputText: string | null = null;
+  private sanitizeError(error: unknown): string {
+    const raw = error instanceof Error ? error.message : String(error);
+    return raw.replace(/Bearer\s+[A-Za-z0-9._-]+/gi, "Bearer ***").slice(0, 400);
+  }
 
-    if (resolvedOutputMessageId) {
-      const outputMessage = await this.chatMessageRepository.findById(
-        resolvedOutputMessageId,
-        input.conversation_id,
-        input.unit_id
-      );
-      outputText = outputMessage?.content ?? null;
-    } else {
-      const outputMessage = await this.chatMessageRepository.findByRemoteId(
-        input.conversation_id,
-        input.unit_id,
-        outputRemoteId
-      );
-      if (outputMessage) {
-        resolvedOutputMessageId = outputMessage.id;
-        outputText = outputMessage.content;
-        await this.aiInboxRepository
-          .markDone(input.unit_id, input.source, input.message_id, outputMessage.id)
-          .catch(() => undefined);
-      }
-    }
-
-    return {
-      success: true,
-      duplicated: true,
-      conversation_id: input.conversation_id,
-      input_message_id: input.message_id,
-      output_message_id: resolvedOutputMessageId,
-      output_text: outputText,
-      agent_name: agentName,
-      provider_name: this.aiResponder.providerName,
-      fallback_in_use: this.aiResponder.isFallback
-    };
+  private errorCode(error: unknown): string {
+    if (error instanceof OpenClawProviderError) return error.code;
+    if (error instanceof DispatchOutboundError) return error.code;
+    if (error instanceof HttpError) return error.code;
+    return "INTERNAL_SERVER_ERROR";
   }
 
   private outputRemoteId(conversationId: string, messageId: string): string {

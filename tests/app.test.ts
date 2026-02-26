@@ -1,17 +1,17 @@
 import { beforeAll, describe, expect, it } from "vitest";
-import type { AiResponder } from "../src/adapters/ai/ai-responder.js";
+import type { OpenClawAgentProvider } from "../src/adapters/agent/openclaw-agent-provider.js";
+import { OpenClawProviderError } from "../src/adapters/agent/openclaw-agent-provider.js";
+import type { OutboundDispatcher } from "../src/adapters/outbound/outbound-dispatcher.js";
+import { DispatchOutboundError } from "../src/adapters/outbound/outbound-dispatcher.js";
 
 process.env.WEBHOOK_SIGNING_SECRET = "test-secret";
 process.env.AI_INTERNAL_TOKEN = "test-ai-token";
 process.env.NODE_ENV = "test";
-process.env.AI_PROVIDER = "mock";
-process.env.AI_PROVIDER_MAX_RETRIES = "1";
 
 let createApp: typeof import("../src/app.js").createApp;
 let InMemoryAiInboxRepository: typeof import("../src/repositories/in-memory/in-memory-ai-inbox.repository.js").InMemoryAiInboxRepository;
 let InMemoryChatConversationRepository: typeof import("../src/repositories/in-memory/in-memory-chat-conversation.repository.js").InMemoryChatConversationRepository;
 let InMemoryChatMessageRepository: typeof import("../src/repositories/in-memory/in-memory-chat-message.repository.js").InMemoryChatMessageRepository;
-let MockAiResponder: typeof import("../src/adapters/ai/mock-ai.responder.js").MockAiResponder;
 
 beforeAll(async () => {
   ({ createApp } = await import("../src/app.js"));
@@ -24,8 +24,28 @@ beforeAll(async () => {
   ({ InMemoryChatMessageRepository } = await import(
     "../src/repositories/in-memory/in-memory-chat-message.repository.js"
   ));
-  ({ MockAiResponder } = await import("../src/adapters/ai/mock-ai.responder.js"));
 });
+
+function successProvider(): OpenClawAgentProvider {
+  return {
+    providerName: "openclaw",
+    async sendMessage() {
+      return {
+        replyText: "Resposta real do Nolan",
+        agentName: "Nolan Neo",
+        providerMessageId: "provider-1"
+      };
+    }
+  };
+}
+
+function successDispatcher(): OutboundDispatcher {
+  return {
+    async dispatchReply() {
+      return { dispatchId: "dispatch-1" };
+    }
+  };
+}
 
 describe("API", () => {
   it("deve responder /healthz", async () => {
@@ -69,12 +89,13 @@ describe("API", () => {
     await app.close();
   });
 
-  it("deve processar mensagem humana valida em conversa IA", async () => {
+  it("deve processar mensagem humana valida com OpenClaw", async () => {
     const app = createApp({
       aiInboxRepository: new InMemoryAiInboxRepository(),
       chatConversationRepository: new InMemoryChatConversationRepository(),
       chatMessageRepository: new InMemoryChatMessageRepository(),
-      aiResponder: new MockAiResponder()
+      openClawProvider: successProvider(),
+      outboundDispatcher: successDispatcher()
     });
 
     const response = await app.inject({
@@ -98,47 +119,29 @@ describe("API", () => {
     expect(response.statusCode).toBe(200);
     expect(response.json().ok).toBe(true);
     expect(response.json().data.output_message_id).toBeTruthy();
-    expect(response.json().data.output_text).toContain("recebi sua mensagem");
-    expect(response.json().data.provider_name).toBe("mock");
-
-    await app.close();
-  });
-
-  it("deve prevenir loop quando remetente ja for o agente", async () => {
-    const app = createApp();
-
-    const response = await app.inject({
-      method: "POST",
-      url: "/ai/reply",
-      headers: {
-        authorization: "Bearer test-ai-token"
-      },
-      payload: {
-        unit_id: "unit-1",
-        conversation_id: "conv-ai-1",
-        message_id: "msg-loop-1",
-        text: "teste",
-        sender_name: "Nolan Neo",
-        source: "internal_panel"
-      }
-    });
-
-    expect(response.statusCode).toBe(200);
-    expect(response.json().ok).toBe(true);
-    expect(response.json().data.output_message_id).toBeNull();
+    expect(response.json().data.agent_name).toBe("Nolan Neo");
 
     await app.close();
   });
 
   it("deve responder duplicata com duplicated=true", async () => {
-    const app = createApp();
+    const app = createApp({
+      aiInboxRepository: new InMemoryAiInboxRepository(),
+      chatConversationRepository: new InMemoryChatConversationRepository(),
+      chatMessageRepository: new InMemoryChatMessageRepository(),
+      openClawProvider: successProvider(),
+      outboundDispatcher: successDispatcher()
+    });
+
     const payload = {
       unit_id: "unit-1",
       conversation_id: "conv-ai-1",
       message_id: "msg-dup-1",
       text: "mensagem unica",
       sender_name: "Alan",
-      source: "internal_panel"
+      source: "internal_panel",
+      timestamp: new Date().toISOString(),
+      metadata: { channel: "internal", attachments: [] }
     };
 
     const first = await app.inject({
@@ -165,7 +168,10 @@ describe("API", () => {
   });
 
   it("deve retornar 404 para conversa inexistente", async () => {
-    const app = createApp();
+    const app = createApp({
+      openClawProvider: successProvider(),
+      outboundDispatcher: successDispatcher()
+    });
 
     const response = await app.inject({
       method: "POST",
@@ -179,37 +185,14 @@ describe("API", () => {
         message_id: "msg-missing-conv",
         text: "oi",
         sender_name: "Alan",
-        source: "internal_panel"
+        source: "internal_panel",
+        timestamp: new Date().toISOString(),
+        metadata: { channel: "internal", attachments: [] }
       }
     });
 
     expect(response.statusCode).toBe(404);
     expect(response.json().error.code).toBe("conversation_not_found");
-
-    await app.close();
-  });
-
-  it("deve retornar 409 para conversa nao IA", async () => {
-    const app = createApp();
-
-    const response = await app.inject({
-      method: "POST",
-      url: "/ai/reply",
-      headers: {
-        authorization: "Bearer test-ai-token"
-      },
-      payload: {
-        unit_id: "unit-1",
-        conversation_id: "conv-human-1",
-        message_id: "msg-human-2",
-        text: "oi",
-        sender_name: "Alan",
-        source: "internal_panel"
-      }
-    });
-
-    expect(response.statusCode).toBe(409);
-    expect(response.json().ok).toBe(false);
 
     await app.close();
   });
@@ -226,7 +209,9 @@ describe("API", () => {
         message_id: "msg-no-auth",
         text: "oi",
         sender_name: "Alan",
-        source: "internal_panel"
+        source: "internal_panel",
+        timestamp: new Date().toISOString(),
+        metadata: { channel: "internal", attachments: [] }
       }
     });
 
@@ -236,14 +221,11 @@ describe("API", () => {
     await app.close();
   });
 
-  it("deve falhar apos retries do provider e manter idempotencia no reenvio", async () => {
-    let calls = 0;
-    const failingResponder: AiResponder = {
-      providerName: "test-failing",
-      isFallback: false,
-      async generateReply() {
-        calls += 1;
-        throw new Error("provider down");
+  it("deve retornar openclaw_unavailable quando provider falhar", async () => {
+    const failingProvider: OpenClawAgentProvider = {
+      providerName: "openclaw",
+      async sendMessage() {
+        throw new OpenClawProviderError("openclaw_unavailable", "connection refused", true);
       }
     };
 
@@ -251,38 +233,111 @@ describe("API", () => {
       aiInboxRepository: new InMemoryAiInboxRepository(),
       chatConversationRepository: new InMemoryChatConversationRepository(),
       chatMessageRepository: new InMemoryChatMessageRepository(),
-      aiResponder: failingResponder
+      openClawProvider: failingProvider,
+      outboundDispatcher: successDispatcher()
     });
 
-    const payload = {
-      unit_id: "unit-1",
-      conversation_id: "conv-ai-1",
-      message_id: "msg-fail-retry-1",
-      text: "oi",
-      sender_name: "Alan",
-      source: "internal_panel"
+    const response = await app.inject({
+      method: "POST",
+      url: "/ai/reply",
+      headers: { authorization: "Bearer test-ai-token" },
+      payload: {
+        unit_id: "unit-1",
+        conversation_id: "conv-ai-1",
+        message_id: "msg-provider-fail",
+        text: "oi",
+        sender_name: "Alan",
+        source: "internal_panel",
+        timestamp: new Date().toISOString(),
+        metadata: { channel: "internal", attachments: [] }
+      }
+    });
+
+    expect(response.statusCode).toBe(503);
+    expect(response.json().error.code).toBe("openclaw_unavailable");
+
+    await app.close();
+  });
+
+  it("deve aplicar retry controlado para falha transitoria do OpenClaw", async () => {
+    let calls = 0;
+    const flakyProvider: OpenClawAgentProvider = {
+      providerName: "openclaw",
+      async sendMessage() {
+        calls += 1;
+        if (calls === 1) {
+          throw new OpenClawProviderError("openclaw_unavailable", "temporary outage", true);
+        }
+        return {
+          replyText: "Resposta apos retry",
+          agentName: "Nolan Neo"
+        };
+      }
     };
 
-    const first = await app.inject({
+    const app = createApp({
+      aiInboxRepository: new InMemoryAiInboxRepository(),
+      chatConversationRepository: new InMemoryChatConversationRepository(),
+      chatMessageRepository: new InMemoryChatMessageRepository(),
+      openClawProvider: flakyProvider,
+      outboundDispatcher: successDispatcher()
+    });
+
+    const response = await app.inject({
       method: "POST",
       url: "/ai/reply",
       headers: { authorization: "Bearer test-ai-token" },
-      payload
+      payload: {
+        unit_id: "unit-1",
+        conversation_id: "conv-ai-1",
+        message_id: "msg-provider-retry",
+        text: "oi",
+        sender_name: "Alan",
+        source: "internal_panel",
+        timestamp: new Date().toISOString(),
+        metadata: { channel: "internal", attachments: [] }
+      }
     });
 
-    const second = await app.inject({
-      method: "POST",
-      url: "/ai/reply",
-      headers: { authorization: "Bearer test-ai-token" },
-      payload
-    });
-
-    expect(first.statusCode).toBe(500);
-    expect(first.json().error.code).toBe("internal_error");
+    expect(response.statusCode).toBe(200);
     expect(calls).toBe(2);
 
-    expect(second.statusCode).toBe(200);
-    expect(second.json().data.duplicated).toBe(true);
+    await app.close();
+  });
+
+  it("deve retornar dispatch_failed quando dispatch outbound falhar", async () => {
+    const failingDispatcher: OutboundDispatcher = {
+      async dispatchReply() {
+        throw new DispatchOutboundError("dispatch_failed", "queue down", true);
+      }
+    };
+
+    const app = createApp({
+      aiInboxRepository: new InMemoryAiInboxRepository(),
+      chatConversationRepository: new InMemoryChatConversationRepository(),
+      chatMessageRepository: new InMemoryChatMessageRepository(),
+      openClawProvider: successProvider(),
+      outboundDispatcher: failingDispatcher
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/ai/reply",
+      headers: { authorization: "Bearer test-ai-token" },
+      payload: {
+        unit_id: "unit-1",
+        conversation_id: "conv-ai-1",
+        message_id: "msg-dispatch-fail",
+        text: "oi",
+        sender_name: "Alan",
+        source: "internal_panel",
+        timestamp: new Date().toISOString(),
+        metadata: { channel: "internal", attachments: [] }
+      }
+    });
+
+    expect(response.statusCode).toBe(502);
+    expect(response.json().error.code).toBe("dispatch_failed");
 
     await app.close();
   });

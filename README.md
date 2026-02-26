@@ -56,6 +56,8 @@ Projeto base de API REST com Fastify, TypeScript, Zod e Pino, preparado para evo
 - `GET /readyz`
 - `POST /api/v1/webhooks/inbound`
 - `POST /api/v1/messages/send`
+- `POST /ai/reply`
+- `POST /api/v1/ai/reply`
 
 Todas as respostas seguem:
 - sucesso: `{ "ok": true, "data": ... }`
@@ -133,6 +135,21 @@ Workflow em `.github/workflows/ci.yml` executa:
 - `RATE_LIMIT_MAX`
 - `RATE_LIMIT_WINDOW`
 - `WEBHOOK_SIGNING_SECRET`
+- `AI_INTERNAL_TOKEN`
+- `AI_CONTEXT_WINDOW`
+- `AI_TRANSIENT_MAX_RETRIES`
+- `OPENCLAW_BASE_URL`
+- `OPENCLAW_GATEWAY_TOKEN`
+- `OPENCLAW_AGENT_ID`
+- `OPENCLAW_TIMEOUT_MS`
+- `DATA_PROVIDER=supabase` (producao)
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+
+## OpenClaw-first (Nolan Neo)
+- O backend Fastify nao gera texto com LLM local.
+- A resposta do agente vem exclusivamente do OpenClaw (`provider=openclaw`).
+- Fluxo completo e contrato do endpoint em [`README_AI_REPLY.md`](README_AI_REPLY.md).
 
 ## Roadmap de evolução
 1. Fase 1 - MVP HTTP

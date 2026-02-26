@@ -12,7 +12,7 @@ type AiInboxRow = {
   conversation_id: string;
   sender_name: string;
   text: string;
-  status: "received" | "done" | "error";
+  status: "received" | "processed" | "failed";
   attempts: number;
   output_message_id: string | null;
   error: string | null;
@@ -23,12 +23,11 @@ type AiInboxRow = {
 export class SupabaseAiInboxRepository implements AiInboxRepository {
   constructor(private readonly client: SupabaseRestClient) {}
 
-  async find(unitId: string, source: string, messageId: string): Promise<AiInboxRecord | null> {
+  async find(unitId: string, messageId: string): Promise<AiInboxRecord | null> {
     const params = new URLSearchParams({
       select:
         "unit_id,source,message_id,conversation_id,sender_name,text,status,attempts,output_message_id,error,created_at,processed_at",
       unit_id: `eq.${unitId}`,
-      source: `eq.${source}`,
       message_id: `eq.${messageId}`,
       limit: "1"
     });
@@ -57,36 +56,35 @@ export class SupabaseAiInboxRepository implements AiInboxRepository {
     return this.mapRow(row);
   }
 
-  async markDone(unitId: string, source: string, messageId: string, outputMessageId: string): Promise<void> {
-    const current = await this.find(unitId, source, messageId);
+  async markProcessed(unitId: string, messageId: string, outputMessageId: string): Promise<void> {
+    const current = await this.find(unitId, messageId);
     if (!current) return;
 
     const filters = new URLSearchParams({
       unit_id: `eq.${unitId}`,
-      source: `eq.${source}`,
       message_id: `eq.${messageId}`
     });
 
     await this.client.update("ai_inbox", filters, {
-      status: "done",
+      status: "processed",
       attempts: current.attempts + 1,
       output_message_id: outputMessageId,
+      error: null,
       processed_at: new Date().toISOString()
     });
   }
 
-  async markError(unitId: string, source: string, messageId: string, error: string): Promise<void> {
-    const current = await this.find(unitId, source, messageId);
+  async markFailed(unitId: string, messageId: string, error: string): Promise<void> {
+    const current = await this.find(unitId, messageId);
     if (!current) return;
 
     const filters = new URLSearchParams({
       unit_id: `eq.${unitId}`,
-      source: `eq.${source}`,
       message_id: `eq.${messageId}`
     });
 
     await this.client.update("ai_inbox", filters, {
-      status: "error",
+      status: "failed",
       attempts: current.attempts + 1,
       error,
       processed_at: new Date().toISOString()

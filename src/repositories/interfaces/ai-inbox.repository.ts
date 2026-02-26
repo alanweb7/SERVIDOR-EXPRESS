@@ -1,4 +1,4 @@
-export type AiInboxStatus = "received" | "done" | "error";
+export type AiInboxStatus = "received" | "processed" | "failed";
 
 export type AiInboxRecord = {
   unitId: string;
@@ -25,8 +25,8 @@ export type CreateAiInboxInput = {
 };
 
 export interface AiInboxRepository {
-  find(unitId: string, source: string, messageId: string): Promise<AiInboxRecord | null>;
+  find(unitId: string, messageId: string): Promise<AiInboxRecord | null>;
   createReceived(input: CreateAiInboxInput): Promise<AiInboxRecord>;
-  markDone(unitId: string, source: string, messageId: string, outputMessageId: string): Promise<void>;
-  markError(unitId: string, source: string, messageId: string, error: string): Promise<void>;
+  markProcessed(unitId: string, messageId: string, outputMessageId: string): Promise<void>;
+  markFailed(unitId: string, messageId: string, error: string): Promise<void>;
 }
