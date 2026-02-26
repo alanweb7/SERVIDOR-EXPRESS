@@ -24,56 +24,56 @@ export class AiReplyService {
   ) {}
 
   async process(input: AiReplyInput): Promise<AiReplyResult> {
-    const existing = await this.aiInboxRepository.find(input.unit_id, input.source, input.message_id);
-    if (existing) {
-      return {
-        success: true,
-        duplicated: true,
-        conversation_id: input.conversation_id,
-        input_message_id: input.message_id,
-        output_message_id: existing.outputMessageId ?? null,
-        agent_name: existing.senderName
-      };
-    }
-
-    const conversation = await this.conversationRepository.findById(input.conversation_id);
-    if (!conversation || conversation.unitId !== input.unit_id) {
-      throw new HttpError(404, "conversation_not_found", "Conversa nao encontrada");
-    }
-
-    if (!conversation.isAiAgent) {
-      throw new HttpError(409, "not_ai_conversation", "Conversa nao esta marcada como IA");
-    }
-
-    const agentName = conversation.aiAgentName || "Nolan Neo";
-
-    if (input.sender_name === agentName || input.source === "internal_ai") {
-      return {
-        success: true,
-        duplicated: false,
-        conversation_id: input.conversation_id,
-        input_message_id: input.message_id,
-        output_message_id: null,
-        agent_name: agentName
-      };
-    }
-
-    const hasText = input.text.trim().length > 0;
-    const attachments = input.metadata?.attachments ?? [];
-    if (!hasText && attachments.length === 0) {
-      throw new HttpError(422, "invalid_payload", "Mensagem sem texto ou anexo processavel");
-    }
-
-    await this.aiInboxRepository.createReceived({
-      unitId: input.unit_id,
-      source: input.source,
-      messageId: input.message_id,
-      conversationId: input.conversation_id,
-      senderName: input.sender_name,
-      text: input.text
-    });
-
     try {
+      const existing = await this.aiInboxRepository.find(input.unit_id, input.source, input.message_id);
+      if (existing) {
+        return {
+          success: true,
+          duplicated: true,
+          conversation_id: input.conversation_id,
+          input_message_id: input.message_id,
+          output_message_id: existing.outputMessageId ?? null,
+          agent_name: existing.senderName
+        };
+      }
+
+      const conversation = await this.conversationRepository.findById(input.conversation_id);
+      if (!conversation || conversation.unitId !== input.unit_id) {
+        throw new HttpError(404, "conversation_not_found", "Conversa nao encontrada");
+      }
+
+      if (!conversation.isAiAgent) {
+        throw new HttpError(409, "not_ai_conversation", "Conversa nao esta marcada como IA");
+      }
+
+      const agentName = conversation.aiAgentName || "Nolan Neo";
+
+      if (input.sender_name === agentName || input.source === "internal_ai") {
+        return {
+          success: true,
+          duplicated: false,
+          conversation_id: input.conversation_id,
+          input_message_id: input.message_id,
+          output_message_id: null,
+          agent_name: agentName
+        };
+      }
+
+      const hasText = input.text.trim().length > 0;
+      const attachments = input.metadata?.attachments ?? [];
+      if (!hasText && attachments.length === 0) {
+        throw new HttpError(422, "invalid_payload", "Mensagem sem texto ou anexo processavel");
+      }
+
+      await this.aiInboxRepository.createReceived({
+        unitId: input.unit_id,
+        source: input.source,
+        messageId: input.message_id,
+        conversationId: input.conversation_id,
+        senderName: input.sender_name,
+        text: input.text
+      });
+
       const contextMessages = await this.chatMessageRepository.listRecentByConversation(
         input.conversation_id,
         input.unit_id,
@@ -110,8 +110,13 @@ export class AiReplyService {
         agent_name: agentName
       };
     } catch (error) {
+      if (error instanceof HttpError) {
+        throw error;
+      }
       const message = error instanceof Error ? error.message : "Erro interno";
-      await this.aiInboxRepository.markError(input.unit_id, input.source, input.message_id, message);
+      await this.aiInboxRepository
+        .markError(input.unit_id, input.source, input.message_id, message)
+        .catch(() => undefined);
       throw new HttpError(500, "internal_error", "Falha ao gerar resposta da IA", error);
     }
   }

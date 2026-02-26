@@ -104,7 +104,7 @@ export function createApp(partialDeps?: Partial<AppDeps>): FastifyInstance {
   app.setErrorHandler((error, request, reply) => {
     if (error instanceof ZodError) {
       request.log.warn({ issues: error.issues }, "Erro de validacao");
-      reply.code(400).send(fail("VALIDATION_ERROR", "Payload invalido"));
+      reply.code(400).send(fail("VALIDATION_ERROR", "Payload invalido", { request_id: request.id }));
       return;
     }
 
@@ -122,12 +122,14 @@ export function createApp(partialDeps?: Partial<AppDeps>): FastifyInstance {
       } else {
         request.log.warn({ code: error.code, message: error.message }, "Erro de negocio");
       }
-      reply.code(error.statusCode).send(fail(error.code, error.message));
+      reply.code(error.statusCode).send(fail(error.code, error.message, { request_id: request.id }));
       return;
     }
 
     request.log.error({ err: error }, "Erro interno nao tratado");
-    reply.code(500).send(fail("INTERNAL_SERVER_ERROR", "Erro interno do servidor"));
+    reply
+      .code(500)
+      .send(fail("INTERNAL_SERVER_ERROR", "Erro interno do servidor", { request_id: request.id }));
   });
 
   return app;
