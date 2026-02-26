@@ -7,7 +7,10 @@ const envSchema = z.object({
   CORS_ORIGIN: z.string().default("*"),
   RATE_LIMIT_MAX: z.coerce.number().int().positive().default(60),
   RATE_LIMIT_WINDOW: z.string().default("1 minute"),
-  WEBHOOK_SIGNING_SECRET: z.string().min(1).default("change-me")
+  WEBHOOK_SIGNING_SECRET: z.string().min(1).default("change-me"),
+  AI_INTERNAL_TOKEN: z.string().min(1).default("change-me-ai-token"),
+  AI_REPLY_TIMEOUT_MS: z.coerce.number().int().positive().default(15000),
+  AI_CONTEXT_WINDOW: z.coerce.number().int().positive().default(12)
 });
 
 export const env = envSchema.parse(process.env);
