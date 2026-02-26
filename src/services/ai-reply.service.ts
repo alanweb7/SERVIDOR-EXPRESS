@@ -112,7 +112,7 @@ export class AiReplyService {
     } catch (error) {
       const message = error instanceof Error ? error.message : "Erro interno";
       await this.aiInboxRepository.markError(input.unit_id, input.source, input.message_id, message);
-      throw new HttpError(500, "internal_error", "Falha ao gerar resposta da IA");
+      throw new HttpError(500, "internal_error", "Falha ao gerar resposta da IA", error);
     }
   }
 }

@@ -109,7 +109,19 @@ export function createApp(partialDeps?: Partial<AppDeps>): FastifyInstance {
     }
 
     if (error instanceof HttpError) {
-      request.log.warn({ code: error.code, message: error.message }, "Erro de negocio");
+      if (error.statusCode >= 500) {
+        request.log.error(
+          {
+            code: error.code,
+            message: error.message,
+            statusCode: error.statusCode,
+            err: error.cause instanceof Error ? error.cause : error
+          },
+          "Erro interno de negocio"
+        );
+      } else {
+        request.log.warn({ code: error.code, message: error.message }, "Erro de negocio");
+      }
       reply.code(error.statusCode).send(fail(error.code, error.message));
       return;
     }
