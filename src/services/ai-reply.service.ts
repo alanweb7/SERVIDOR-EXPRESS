@@ -76,6 +76,7 @@ export class AiReplyService {
     try {
       const contextMessages = await this.chatMessageRepository.listRecentByConversation(
         input.conversation_id,
+        input.unit_id,
         this.contextWindow
       );
 

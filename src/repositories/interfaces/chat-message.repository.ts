@@ -21,6 +21,6 @@ export type CreateChatMessageInput = {
 };
 
 export interface ChatMessageRepository {
-  listRecentByConversation(conversationId: string, limit: number): Promise<ChatMessage[]>;
+  listRecentByConversation(conversationId: string, unitId: string, limit: number): Promise<ChatMessage[]>;
   create(input: CreateChatMessageInput): Promise<ChatMessage>;
 }

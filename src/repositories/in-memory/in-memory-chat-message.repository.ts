@@ -8,9 +8,9 @@ import type {
 export class InMemoryChatMessageRepository implements ChatMessageRepository {
   private readonly store = new Map<string, ChatMessage[]>();
 
-  async listRecentByConversation(conversationId: string, limit: number): Promise<ChatMessage[]> {
+  async listRecentByConversation(conversationId: string, unitId: string, limit: number): Promise<ChatMessage[]> {
     const messages = this.store.get(conversationId) ?? [];
-    return messages.slice(Math.max(messages.length - limit, 0));
+    return messages.filter((m) => m.unitId === unitId).slice(Math.max(messages.length - limit, 0));
   }
 
   async create(input: CreateChatMessageInput): Promise<ChatMessage> {

@@ -10,7 +10,10 @@ const envSchema = z.object({
   WEBHOOK_SIGNING_SECRET: z.string().min(1).default("change-me"),
   AI_INTERNAL_TOKEN: z.string().min(1).default("change-me-ai-token"),
   AI_REPLY_TIMEOUT_MS: z.coerce.number().int().positive().default(15000),
-  AI_CONTEXT_WINDOW: z.coerce.number().int().positive().default(12)
+  AI_CONTEXT_WINDOW: z.coerce.number().int().positive().default(12),
+  DATA_PROVIDER: z.enum(["inmemory", "supabase"]).default("inmemory"),
+  SUPABASE_URL: z.string().url().optional(),
+  SUPABASE_SERVICE_ROLE_KEY: z.string().optional()
 });
 
 export const env = envSchema.parse(process.env);

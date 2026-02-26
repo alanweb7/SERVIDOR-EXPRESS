@@ -43,3 +43,11 @@ Body:
    - `remote_id = ai:{conversation_id}:{message_id}`
 5. Atualiza conversa (`last_message`, `unread_count + 1`, `updated_at`).
 6. Marca `ai_inbox` como `done`.
+
+## Provider real (Supabase)
+Defina no ambiente:
+- `DATA_PROVIDER=supabase`
+- `SUPABASE_URL=https://<project>.supabase.co`
+- `SUPABASE_SERVICE_ROLE_KEY=<service_role>`
+
+Com isso, os repositorios reais sao usados no lugar dos `InMemory...`.

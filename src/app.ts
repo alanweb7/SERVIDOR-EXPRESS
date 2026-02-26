@@ -14,7 +14,11 @@ import { InMemoryCacheProvider } from "./adapters/cache/in-memory-cache.provider
 import { InMemoryAiInboxRepository } from "./repositories/in-memory/in-memory-ai-inbox.repository.js";
 import { InMemoryChatConversationRepository } from "./repositories/in-memory/in-memory-chat-conversation.repository.js";
 import { InMemoryChatMessageRepository } from "./repositories/in-memory/in-memory-chat-message.repository.js";
+import { SupabaseAiInboxRepository } from "./repositories/supabase/supabase-ai-inbox.repository.js";
+import { SupabaseChatConversationRepository } from "./repositories/supabase/supabase-chat-conversation.repository.js";
+import { SupabaseChatMessageRepository } from "./repositories/supabase/supabase-chat-message.repository.js";
 import { MockAiResponder } from "./adapters/ai/mock-ai.responder.js";
+import { SupabaseRestClient } from "./adapters/db/supabase-rest.client.js";
 import { attachCorrelationContext } from "./middlewares/correlation.js";
 import type { MessageDedupRepository } from "./repositories/interfaces/message-dedup.repository.js";
 import type { QueuePublisher } from "./adapters/queue/queue-publisher.js";
@@ -43,14 +47,34 @@ export function createApp(partialDeps?: Partial<AppDeps>): FastifyInstance {
     requestIdLogLabel: "requestId"
   });
 
+  const useSupabase =
+    env.DATA_PROVIDER === "supabase" &&
+    typeof env.SUPABASE_URL === "string" &&
+    env.SUPABASE_URL.length > 0 &&
+    typeof env.SUPABASE_SERVICE_ROLE_KEY === "string" &&
+    env.SUPABASE_SERVICE_ROLE_KEY.length > 0;
+
+  const supabaseClient = useSupabase
+    ? new SupabaseRestClient(env.SUPABASE_URL as string, env.SUPABASE_SERVICE_ROLE_KEY as string)
+    : null;
+
   app.decorate("deps", {
     dedupRepository: partialDeps?.dedupRepository ?? new InMemoryMessageDedupRepository(),
     queuePublisher: partialDeps?.queuePublisher ?? new MockQueuePublisher(),
     cacheProvider: partialDeps?.cacheProvider ?? new InMemoryCacheProvider(),
-    aiInboxRepository: partialDeps?.aiInboxRepository ?? new InMemoryAiInboxRepository(),
+    aiInboxRepository:
+      partialDeps?.aiInboxRepository ??
+      (supabaseClient ? new SupabaseAiInboxRepository(supabaseClient) : new InMemoryAiInboxRepository()),
     chatConversationRepository:
-      partialDeps?.chatConversationRepository ?? new InMemoryChatConversationRepository(),
-    chatMessageRepository: partialDeps?.chatMessageRepository ?? new InMemoryChatMessageRepository(),
+      partialDeps?.chatConversationRepository ??
+      (supabaseClient
+        ? new SupabaseChatConversationRepository(supabaseClient)
+        : new InMemoryChatConversationRepository()),
+    chatMessageRepository:
+      partialDeps?.chatMessageRepository ??
+      (supabaseClient
+        ? new SupabaseChatMessageRepository(supabaseClient)
+        : new InMemoryChatMessageRepository()),
     aiResponder: partialDeps?.aiResponder ?? new MockAiResponder()
   });
 
