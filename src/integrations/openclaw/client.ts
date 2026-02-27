@@ -205,9 +205,10 @@ export class OpenClawClient {
     const protocolVersion = this.options.protocolVersion ?? 3;
     const identity = this.deviceIdentity;
     const nonce = this.challengeNonce ?? "";
+    const signedAt = new Date().toISOString();
     const signature =
       identity && nonce
-        ? signPayload(null, Buffer.from(nonce, "utf8"), identity.privateKeyPem).toString("base64")
+        ? signPayload(null, Buffer.from(`${nonce}:${signedAt}`, "utf8"), identity.privateKeyPem).toString("base64")
         : "";
 
     this.connectReqId = this.sendRequest("connect", {
@@ -229,7 +230,7 @@ export class OpenClawClient {
               nonce,
               publicKey: identity.publicKeyPem,
               signature,
-              algorithm: "ed25519"
+              signedAt
             }
           : undefined,
       role: "operator",

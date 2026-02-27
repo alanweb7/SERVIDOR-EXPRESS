@@ -92,7 +92,8 @@ export class OpenClawWsAgentProvider implements OpenClawAgentProvider {
     return (
       error.code === "missing_scope_operator_write" ||
       error.code === "pairing_required" ||
-      error.code === "origin_not_allowed"
+      error.code === "origin_not_allowed" ||
+      error.code === "invalid_request_frame"
     );
   }
 }
