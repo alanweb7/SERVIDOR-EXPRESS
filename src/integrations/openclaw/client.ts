@@ -205,7 +205,7 @@ export class OpenClawClient {
     const protocolVersion = this.options.protocolVersion ?? 3;
     const identity = this.deviceIdentity;
     const nonce = this.challengeNonce ?? "";
-    const signedAt = new Date().toISOString();
+    const signedAt = Date.now();
     const signature =
       identity && nonce
         ? signPayload(null, Buffer.from(`${nonce}:${signedAt}`, "utf8"), identity.privateKeyPem).toString("base64")
@@ -319,6 +319,9 @@ export class OpenClawClient {
       return new OpenClawWsError("unauthorized", message, false);
     }
     if (normalized.includes("frame") || normalized.includes("invalid request")) {
+      return new OpenClawWsError("invalid_request_frame", message, false);
+    }
+    if (normalized.includes("invalid connect params")) {
       return new OpenClawWsError("invalid_request_frame", message, false);
     }
 
