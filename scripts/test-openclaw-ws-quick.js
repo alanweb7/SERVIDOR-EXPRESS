@@ -1,6 +1,7 @@
 const OPENCLAW_GATEWAY_URL = process.env.OPENCLAW_GATEWAY_URL || "ws://openclaw:18789";
 const OPENCLAW_GATEWAY_TOKEN = process.env.OPENCLAW_GATEWAY_TOKEN || "";
 const OPENCLAW_SESSION_DEFAULT = process.env.OPENCLAW_SESSION_DEFAULT || "agent:main:main";
+const OPENCLAW_PROTOCOL_VERSION = Number(process.env.OPENCLAW_PROTOCOL_VERSION || "3");
 const TIMEOUT_MS = 15_000;
 
 if (!OPENCLAW_GATEWAY_TOKEN) {
@@ -38,13 +39,22 @@ socket.addEventListener("message", (event) => {
     socket.send(
       JSON.stringify({
         type: "req",
-        req: "connect",
-        reqId: (connectReqId = crypto.randomUUID()),
-        payload: {
-          token: OPENCLAW_GATEWAY_TOKEN,
+        id: (connectReqId = crypto.randomUUID()),
+        method: "connect",
+        params: {
+          minProtocol: OPENCLAW_PROTOCOL_VERSION,
+          maxProtocol: OPENCLAW_PROTOCOL_VERSION,
+          client: {
+            id: "openclaw-control-ui",
+            version: "dev",
+            platform: "linux",
+            mode: "ui"
+          },
+          auth: {
+            token: OPENCLAW_GATEWAY_TOKEN
+          },
           role: "operator",
-          scopes: ["operator.write"],
-          client: { id: "openclaw-control-ui", mode: "ui" }
+          scopes: ["operator.write"]
         }
       })
     );
@@ -53,8 +63,8 @@ socket.addEventListener("message", (event) => {
 
   if (
     frame.event === "connect.ok" ||
-    (frame.type === "res" && frame.reqId === connectReqId && frame.ok === true) ||
-    (frame.req === "connect" && frame.ok === true)
+    (frame.type === "res" && frame.id === connectReqId && frame.ok === true) ||
+    (frame.method === "connect" && frame.ok === true)
   ) {
     connectDone = true;
     console.log("[CONNECT OK]");
@@ -63,9 +73,9 @@ socket.addEventListener("message", (event) => {
       socket.send(
         JSON.stringify({
           type: "req",
-          req: "chat.send",
-          reqId: (chatReqId = crypto.randomUUID()),
-          payload: {
+          id: (chatReqId = crypto.randomUUID()),
+          method: "chat.send",
+          params: {
             sessionKey: OPENCLAW_SESSION_DEFAULT,
             message: "Teste rapido WS via lab-api",
             idempotencyKey: crypto.randomUUID()
@@ -78,13 +88,15 @@ socket.addEventListener("message", (event) => {
 
   if (
     frame.event === "chat.send.ok" ||
-    (frame.type === "res" && frame.reqId === chatReqId && frame.ok === true) ||
-    frame.req === "chat.send" ||
+    (frame.type === "res" && frame.id === chatReqId && frame.ok === true) ||
+    frame.method === "chat.send" ||
     frame.event === "chat.message" ||
     frame.message ||
     frame.replyText ||
-    frame?.payload?.message ||
-    frame?.payload?.replyText ||
+    frame?.params?.message ||
+    frame?.params?.replyText ||
+    frame?.result?.message ||
+    frame?.result?.replyText ||
     frame?.data?.message
   ) {
     console.log("[CHAT.SEND OK]");

@@ -1,4 +1,4 @@
-import { createHmac, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 
 type GatewayFrame = Record<string, unknown>;
 
@@ -40,7 +40,6 @@ export class OpenClawGatewayError extends Error {
 export class OpenClawGatewayClient {
   private socket: any | null = null;
   private readonly pending = new Map<string, (frame: GatewayFrame) => void>();
-  private challengeNonce: string | null = null;
   private connectReqId: string | null = null;
   private isConnected = false;
 
@@ -72,8 +71,11 @@ export class OpenClawGatewayClient {
 
     const response = await this.waitForFrame(
       (frame) =>
+        frame["id"] === reqId ||
         frame["reqId"] === reqId ||
+        this.readNestedString(frame, "params", "id") === reqId ||
         this.readNestedString(frame, "payload", "reqId") === reqId ||
+        frame["method"] === "chat.send" ||
         frame["req"] === "chat.send" ||
         frame["event"] === "chat.send.ok" ||
         frame["event"] === "chat.message",
@@ -86,12 +88,15 @@ export class OpenClawGatewayClient {
 
     const replyText =
       this.readString(response, "replyText") ??
+      this.readNestedString(response, "result", "replyText") ??
+      this.readNestedString(response, "params", "replyText") ??
       this.readNestedString(response, "payload", "replyText") ??
       this.readNestedString(response, "data", "replyText") ??
       this.readString(response, "message") ??
+      this.readNestedString(response, "result", "message") ??
+      this.readNestedString(response, "params", "message") ??
       this.readNestedString(response, "payload", "message") ??
       this.readNestedString(response, "data", "message") ??
-      this.readNestedString(response, "result", "message") ??
       "";
 
     if (!replyText.trim()) {
@@ -102,12 +107,15 @@ export class OpenClawGatewayClient {
       replyText,
       providerMessageId:
         this.readString(response, "messageId") ??
+        this.readNestedString(response, "result", "messageId") ??
+        this.readNestedString(response, "params", "messageId") ??
         this.readNestedString(response, "payload", "messageId") ??
         this.readNestedString(response, "data", "messageId") ??
-        this.readNestedString(response, "result", "messageId") ??
         undefined,
       correlationId:
         this.readString(response, "correlationId") ??
+        this.readNestedString(response, "result", "correlationId") ??
+        this.readNestedString(response, "params", "correlationId") ??
         this.readNestedString(response, "payload", "correlationId") ??
         this.readNestedString(response, "data", "correlationId") ??
         undefined
@@ -121,7 +129,6 @@ export class OpenClawGatewayClient {
     }
     this.pending.clear();
     this.isConnected = false;
-    this.challengeNonce = null;
   }
 
   private async openSocket(): Promise<void> {
@@ -149,17 +156,15 @@ export class OpenClawGatewayClient {
           this.debug("ws.in", frame);
           this.handleIncomingFrame(frame);
           if (frame["event"] === "connect.challenge") {
-            const nonce =
-              this.readString(frame, "nonce") ??
-              this.readNestedString(frame, "data", "nonce") ??
-              this.readNestedString(frame, "payload", "nonce");
-            if (nonce) this.challengeNonce = nonce;
             this.sendConnectFrame();
           }
           if (
             frame["event"] === "connect.ok" ||
             (frame["req"] === "connect" && frame["ok"] === true) ||
-            (frame["type"] === "res" && frame["reqId"] === this.connectReqId && frame["ok"] === true)
+            (frame["method"] === "connect" && frame["ok"] === true) ||
+            (frame["type"] === "res" &&
+              (frame["id"] === this.connectReqId || frame["reqId"] === this.connectReqId) &&
+              frame["ok"] === true)
           ) {
             clearTimeout(timeout);
             this.isConnected = true;
@@ -168,8 +173,10 @@ export class OpenClawGatewayClient {
           if (
             this.isErrorFrame(frame) &&
             (frame["req"] === "connect" ||
+              frame["method"] === "connect" ||
               frame["event"] === "connect.error" ||
-              (frame["type"] === "res" && frame["reqId"] === this.connectReqId))
+              (frame["type"] === "res" &&
+                (frame["id"] === this.connectReqId || frame["reqId"] === this.connectReqId)))
           ) {
             clearTimeout(timeout);
             reject(this.mapProtocolError(frame));
@@ -193,27 +200,21 @@ export class OpenClawGatewayClient {
   }
 
   private sendConnectFrame(): void {
-    const nonce = this.challengeNonce ?? "";
-    const deviceId = `lab-api:${this.options.agentId}`;
-    const signature = this.signNonce(deviceId, nonce, this.options.token);
     this.connectReqId = this.sendRequest("connect", {
-        token: this.options.token,
+        minProtocol: 3,
+        maxProtocol: 3,
+        client: {
+          id: "gateway-client",
+          version: this.options.agentId || "dev",
+          platform: "linux",
+          mode: "backend"
+        },
+        auth: {
+          token: this.options.token
+        },
         role: "operator",
         scopes: ["operator.write"],
-        client: {
-          id: deviceId,
-          mode: "service"
-        },
-        device: {
-          id: deviceId,
-          nonce,
-          signature
-        }
       });
-  }
-
-  private signNonce(deviceId: string, nonce: string, secret: string): string {
-    return createHmac("sha256", secret).update(`${deviceId}:${nonce}`).digest("hex");
   }
 
   private sendFrame(frame: GatewayFrame): void {
@@ -224,15 +225,15 @@ export class OpenClawGatewayClient {
     this.socket.send(JSON.stringify(frame));
   }
 
-  private sendRequest(req: string, payload: Record<string, unknown>): string {
-    const reqId = randomUUID();
+  private sendRequest(method: string, params: Record<string, unknown>): string {
+    const id = randomUUID();
     this.sendFrame({
       type: "req",
-      req,
-      reqId,
-      payload
+      id,
+      method,
+      params
     });
-    return reqId;
+    return id;
   }
 
   private waitForFrame(
