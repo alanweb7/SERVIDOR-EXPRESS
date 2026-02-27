@@ -2,6 +2,8 @@ const OPENCLAW_GATEWAY_URL = process.env.OPENCLAW_GATEWAY_URL || "ws://openclaw:
 const OPENCLAW_GATEWAY_TOKEN = process.env.OPENCLAW_GATEWAY_TOKEN || "";
 const OPENCLAW_SESSION_DEFAULT = process.env.OPENCLAW_SESSION_DEFAULT || "agent:main:main";
 const OPENCLAW_PROTOCOL_VERSION = Number(process.env.OPENCLAW_PROTOCOL_VERSION || "3");
+const OPENCLAW_CLIENT_ID = process.env.OPENCLAW_CLIENT_ID || "gateway-client";
+const OPENCLAW_CLIENT_MODE = process.env.OPENCLAW_CLIENT_MODE || "backend";
 const TIMEOUT_MS = 15_000;
 
 if (!OPENCLAW_GATEWAY_TOKEN) {
@@ -45,10 +47,10 @@ socket.addEventListener("message", (event) => {
           minProtocol: OPENCLAW_PROTOCOL_VERSION,
           maxProtocol: OPENCLAW_PROTOCOL_VERSION,
           client: {
-            id: "openclaw-control-ui",
+            id: OPENCLAW_CLIENT_ID,
             version: "dev",
             platform: "linux",
-            mode: "ui"
+            mode: OPENCLAW_CLIENT_MODE
           },
           auth: {
             token: OPENCLAW_GATEWAY_TOKEN
