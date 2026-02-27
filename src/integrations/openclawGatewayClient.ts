@@ -41,6 +41,7 @@ export class OpenClawGatewayClient {
   private socket: any | null = null;
   private readonly pending = new Map<string, (frame: GatewayFrame) => void>();
   private challengeNonce: string | null = null;
+  private connectReqId: string | null = null;
   private isConnected = false;
 
   constructor(private readonly options: ConnectOptions) {}
@@ -63,20 +64,16 @@ export class OpenClawGatewayClient {
 
   async sendChat(input: SendChatInput): Promise<SendChatOutput> {
     await this.connect();
-    const reqId = randomUUID();
-    this.sendFrame({
-      req: "chat.send",
-      reqId,
-      params: {
+    const reqId = this.sendRequest("chat.send", {
         sessionKey: input.sessionKey,
         message: input.message,
         idempotencyKey: input.idempotencyKey
-      }
     });
 
     const response = await this.waitForFrame(
       (frame) =>
         frame["reqId"] === reqId ||
+        this.readNestedString(frame, "payload", "reqId") === reqId ||
         frame["req"] === "chat.send" ||
         frame["event"] === "chat.send.ok" ||
         frame["event"] === "chat.message",
@@ -89,8 +86,10 @@ export class OpenClawGatewayClient {
 
     const replyText =
       this.readString(response, "replyText") ??
+      this.readNestedString(response, "payload", "replyText") ??
       this.readNestedString(response, "data", "replyText") ??
       this.readString(response, "message") ??
+      this.readNestedString(response, "payload", "message") ??
       this.readNestedString(response, "data", "message") ??
       this.readNestedString(response, "result", "message") ??
       "";
@@ -103,11 +102,13 @@ export class OpenClawGatewayClient {
       replyText,
       providerMessageId:
         this.readString(response, "messageId") ??
+        this.readNestedString(response, "payload", "messageId") ??
         this.readNestedString(response, "data", "messageId") ??
         this.readNestedString(response, "result", "messageId") ??
         undefined,
       correlationId:
         this.readString(response, "correlationId") ??
+        this.readNestedString(response, "payload", "correlationId") ??
         this.readNestedString(response, "data", "correlationId") ??
         undefined
     };
@@ -155,12 +156,21 @@ export class OpenClawGatewayClient {
             if (nonce) this.challengeNonce = nonce;
             this.sendConnectFrame();
           }
-          if (frame["event"] === "connect.ok" || (frame["req"] === "connect" && frame["ok"] === true)) {
+          if (
+            frame["event"] === "connect.ok" ||
+            (frame["req"] === "connect" && frame["ok"] === true) ||
+            (frame["type"] === "res" && frame["reqId"] === this.connectReqId && frame["ok"] === true)
+          ) {
             clearTimeout(timeout);
             this.isConnected = true;
             resolve();
           }
-          if (this.isErrorFrame(frame) && (frame["req"] === "connect" || frame["event"] === "connect.error")) {
+          if (
+            this.isErrorFrame(frame) &&
+            (frame["req"] === "connect" ||
+              frame["event"] === "connect.error" ||
+              (frame["type"] === "res" && frame["reqId"] === this.connectReqId))
+          ) {
             clearTimeout(timeout);
             reject(this.mapProtocolError(frame));
           }
@@ -183,14 +193,10 @@ export class OpenClawGatewayClient {
   }
 
   private sendConnectFrame(): void {
-    const reqId = randomUUID();
     const nonce = this.challengeNonce ?? "";
     const deviceId = `lab-api:${this.options.agentId}`;
     const signature = this.signNonce(deviceId, nonce, this.options.token);
-    this.sendFrame({
-      req: "connect",
-      reqId,
-      params: {
+    this.connectReqId = this.sendRequest("connect", {
         token: this.options.token,
         role: "operator",
         scopes: ["operator.write"],
@@ -203,8 +209,7 @@ export class OpenClawGatewayClient {
           nonce,
           signature
         }
-      }
-    });
+      });
   }
 
   private signNonce(deviceId: string, nonce: string, secret: string): string {
@@ -217,6 +222,17 @@ export class OpenClawGatewayClient {
     }
     this.debug("ws.out", frame);
     this.socket.send(JSON.stringify(frame));
+  }
+
+  private sendRequest(req: string, payload: Record<string, unknown>): string {
+    const reqId = randomUUID();
+    this.sendFrame({
+      type: "req",
+      req,
+      reqId,
+      payload
+    });
+    return reqId;
   }
 
   private waitForFrame(

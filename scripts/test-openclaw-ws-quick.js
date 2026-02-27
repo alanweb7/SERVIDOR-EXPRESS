@@ -17,6 +17,8 @@ if (!WebSocketCtor) {
 const socket = new WebSocketCtor(OPENCLAW_GATEWAY_URL);
 let connectDone = false;
 let chatSent = false;
+let connectReqId = "";
+let chatReqId = "";
 
 const timeout = setTimeout(() => {
   console.error("[TIMEOUT] Encerrando apos 15s sem completar fluxo");
@@ -35,9 +37,10 @@ socket.addEventListener("message", (event) => {
     console.log("[CHALLENGE] recebido");
     socket.send(
       JSON.stringify({
+        type: "req",
         req: "connect",
-        reqId: crypto.randomUUID(),
-        params: {
+        reqId: (connectReqId = crypto.randomUUID()),
+        payload: {
           token: OPENCLAW_GATEWAY_TOKEN,
           role: "operator",
           scopes: ["operator.write"],
@@ -48,16 +51,21 @@ socket.addEventListener("message", (event) => {
     return;
   }
 
-  if (frame.event === "connect.ok" || (frame.req === "connect" && frame.ok === true)) {
+  if (
+    frame.event === "connect.ok" ||
+    (frame.type === "res" && frame.reqId === connectReqId && frame.ok === true) ||
+    (frame.req === "connect" && frame.ok === true)
+  ) {
     connectDone = true;
     console.log("[CONNECT OK]");
     if (!chatSent) {
       chatSent = true;
       socket.send(
         JSON.stringify({
+          type: "req",
           req: "chat.send",
-          reqId: crypto.randomUUID(),
-          params: {
+          reqId: (chatReqId = crypto.randomUUID()),
+          payload: {
             sessionKey: OPENCLAW_SESSION_DEFAULT,
             message: "Teste rapido WS via lab-api",
             idempotencyKey: crypto.randomUUID()
@@ -70,10 +78,13 @@ socket.addEventListener("message", (event) => {
 
   if (
     frame.event === "chat.send.ok" ||
+    (frame.type === "res" && frame.reqId === chatReqId && frame.ok === true) ||
     frame.req === "chat.send" ||
     frame.event === "chat.message" ||
     frame.message ||
     frame.replyText ||
+    frame?.payload?.message ||
+    frame?.payload?.replyText ||
     frame?.data?.message
   ) {
     console.log("[CHAT.SEND OK]");
