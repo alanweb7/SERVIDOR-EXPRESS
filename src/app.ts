@@ -17,7 +17,7 @@ import { InMemoryChatMessageRepository } from "./repositories/in-memory/in-memor
 import { SupabaseAiInboxRepository } from "./repositories/supabase/supabase-ai-inbox.repository.js";
 import { SupabaseChatConversationRepository } from "./repositories/supabase/supabase-chat-conversation.repository.js";
 import { SupabaseChatMessageRepository } from "./repositories/supabase/supabase-chat-message.repository.js";
-import { OpenClawHttpAgentProvider } from "./adapters/agent/openclaw-http-agent.provider.js";
+import { OpenClawWsAgentProvider } from "./adapters/agent/openclaw-ws-agent.provider.js";
 import { QueueOutboundDispatcher } from "./adapters/outbound/queue-outbound.dispatcher.js";
 import { SupabaseRestClient } from "./adapters/db/supabase-rest.client.js";
 import { attachCorrelationContext } from "./middlewares/correlation.js";
@@ -30,6 +30,7 @@ import type { ChatMessageRepository } from "./repositories/interfaces/chat-messa
 import type { OpenClawAgentProvider } from "./adapters/agent/openclaw-agent-provider.js";
 import { OpenClawProviderError } from "./adapters/agent/openclaw-agent-provider.js";
 import type { OutboundDispatcher } from "./adapters/outbound/outbound-dispatcher.js";
+import { OpenClawGatewayClient } from "./integrations/openclawGatewayClient.js";
 
 export type AppDeps = {
   dedupRepository: MessageDedupRepository;
@@ -146,7 +147,7 @@ export function createApp(partialDeps?: Partial<AppDeps>): FastifyInstance {
 }
 
 function createOpenClawProvider(): OpenClawAgentProvider {
-  if (!env.OPENCLAW_BASE_URL || !env.OPENCLAW_GATEWAY_TOKEN || !env.OPENCLAW_AGENT_ID) {
+  if (!env.OPENCLAW_GATEWAY_URL || !env.OPENCLAW_GATEWAY_TOKEN || !env.OPENCLAW_AGENT_ID) {
     return {
       providerName: "openclaw",
       async sendMessage() {
@@ -155,11 +156,17 @@ function createOpenClawProvider(): OpenClawAgentProvider {
     };
   }
 
-  return new OpenClawHttpAgentProvider({
-    baseUrl: env.OPENCLAW_BASE_URL,
-    gatewayToken: env.OPENCLAW_GATEWAY_TOKEN,
+  const gatewayClient = new OpenClawGatewayClient({
+    url: env.OPENCLAW_GATEWAY_URL,
+    token: env.OPENCLAW_GATEWAY_TOKEN,
     agentId: env.OPENCLAW_AGENT_ID,
-    timeoutMs: env.OPENCLAW_TIMEOUT_MS
+    timeoutMs: env.OPENCLAW_CONNECT_TIMEOUT_MS,
+    debug: env.OPENCLAW_DEBUG
+  });
+
+  return new OpenClawWsAgentProvider({
+    gatewayClient,
+    sessionDefault: env.OPENCLAW_SESSION_DEFAULT
   });
 }
 

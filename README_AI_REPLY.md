@@ -1,7 +1,7 @@
 # AI Reply Flow (`POST /ai/reply`)
 
 ## Objetivo
-Orquestrar autenticacao, persistencia e dispatch no backend Fastify, delegando a geracao da resposta exclusivamente ao agente Nolan no OpenClaw.
+Orquestrar autenticacao, persistencia e dispatch no backend Fastify, delegando a geracao da resposta exclusivamente ao agente Nolan no OpenClaw Gateway via WebSocket.
 
 ## Arquitetura
 Evolution API / Chat CRM
@@ -50,10 +50,12 @@ Body obrigatorio:
 - `DATA_PROVIDER=supabase`
 - `SUPABASE_URL=https://<project>.supabase.co`
 - `SUPABASE_SERVICE_ROLE_KEY=<service_role>`
-- `OPENCLAW_BASE_URL=<url-openclaw>`
+- `OPENCLAW_GATEWAY_URL=ws://openclaw:18789`
 - `OPENCLAW_GATEWAY_TOKEN=<token-interno>`
 - `OPENCLAW_AGENT_ID=<agent-id-do-nolan>`
-- `OPENCLAW_TIMEOUT_MS=15000`
+- `OPENCLAW_SESSION_DEFAULT=agent:main:main`
+- `OPENCLAW_CONNECT_TIMEOUT_MS=15000`
+- `OPENCLAW_DEBUG=false`
 - `AI_TRANSIENT_MAX_RETRIES=1`
 
 ## Observabilidade

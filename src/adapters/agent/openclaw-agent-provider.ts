@@ -3,12 +3,14 @@ import type { ChatMessage } from "../../repositories/interfaces/chat-message.rep
 export type OpenClawMessageContext = {
   unitId: string;
   conversationId: string;
+  messageId: string;
   senderName: string;
   text: string;
   source: string;
   timestamp: string;
   metadata?: {
     channel?: string;
+    remote_jid?: string;
     attachments?: unknown[];
   };
   history: ChatMessage[];

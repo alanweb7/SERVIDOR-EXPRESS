@@ -50,6 +50,10 @@ export class AiReplyService {
       unit_id: input.unit_id,
       conversation_id: input.conversation_id,
       message_id: input.message_id,
+      sender_name: input.sender_name,
+      source: input.source,
+      timestamp: input.timestamp,
+      metadata: input.metadata,
       provider: this.openClawProvider.providerName
     };
 
@@ -118,6 +122,7 @@ export class AiReplyService {
           this.openClawProvider.sendMessage({
             unitId: input.unit_id,
             conversationId: input.conversation_id,
+            messageId: input.message_id,
             senderName: input.sender_name,
             text: input.text,
             source: input.source,
