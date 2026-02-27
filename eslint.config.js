@@ -6,6 +6,16 @@ import tsParser from "@typescript-eslint/parser";
 export default [
   js.configs.recommended,
   {
+    files: ["**/*.js"],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: "module",
+      globals: {
+        ...globals.node
+      }
+    }
+  },
+  {
     files: ["**/*.ts"],
     languageOptions: {
       parser: tsParser,

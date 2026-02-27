@@ -1,4 +1,3 @@
-/* eslint-disable no-console */
 const OPENCLAW_GATEWAY_URL = process.env.OPENCLAW_GATEWAY_URL || "ws://openclaw:18789";
 const OPENCLAW_GATEWAY_TOKEN = process.env.OPENCLAW_GATEWAY_TOKEN || "";
 const OPENCLAW_SESSION_DEFAULT = process.env.OPENCLAW_SESSION_DEFAULT || "agent:main:main";
