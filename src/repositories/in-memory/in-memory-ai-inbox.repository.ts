@@ -26,14 +26,14 @@ export class InMemoryAiInboxRepository implements AiInboxRepository {
     return record;
   }
 
-  async markProcessed(unitId: string, messageId: string, outputMessageId: string): Promise<void> {
+  async markProcessed(unitId: string, messageId: string, outputMessageId: string | null): Promise<void> {
     const current = this.store.get(key(unitId, messageId));
     if (!current) return;
     this.store.set(key(unitId, messageId), {
       ...current,
       status: "processed",
       attempts: current.attempts + 1,
-      outputMessageId,
+      outputMessageId: outputMessageId ?? undefined,
       error: undefined,
       processedAt: new Date()
     });

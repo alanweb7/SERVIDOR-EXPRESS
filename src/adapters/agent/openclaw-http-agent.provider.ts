@@ -72,6 +72,7 @@ export class OpenClawHttpAgentProvider implements OpenClawAgentProvider {
       return {
         replyText: text,
         agentName: payload.agent_name?.trim() || "Nolan Neo",
+        deliveryMode: "ws",
         providerMessageId: payload.provider_message_id,
         correlationId: payload.correlation_id
       };

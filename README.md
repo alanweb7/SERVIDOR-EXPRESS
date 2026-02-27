@@ -142,6 +142,8 @@ Workflow em `.github/workflows/ci.yml` executa:
 - `OPENCLAW_GATEWAY_TOKEN`
 - `OPENCLAW_AGENT_ID`
 - `OPENCLAW_SESSION_DEFAULT`
+- `OPENCLAW_ENABLE_FALLBACK_CLI`
+- `OPENCLAW_FALLBACK_CONTAINER`
 - `OPENCLAW_CONNECT_TIMEOUT_MS`
 - `OPENCLAW_DEBUG`
 - `DATA_PROVIDER=supabase` (producao)
@@ -150,7 +152,8 @@ Workflow em `.github/workflows/ci.yml` executa:
 
 ## OpenClaw-first (Nolan Neo)
 - O backend Fastify nao gera texto com LLM local.
-- A resposta do agente vem exclusivamente do OpenClaw (`provider=openclaw`).
+- Caminho principal: `WS` no OpenClaw (`delivery_mode=ws`).
+- Fallback temporario (opcional): `fallback-cli` com `openclaw gateway call chat.send`.
 - Fluxo completo e contrato do endpoint em [`README_AI_REPLY.md`](README_AI_REPLY.md).
 
 ## Roadmap de evolução

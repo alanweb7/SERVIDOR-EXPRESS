@@ -27,6 +27,6 @@ export type CreateAiInboxInput = {
 export interface AiInboxRepository {
   find(unitId: string, messageId: string): Promise<AiInboxRecord | null>;
   createReceived(input: CreateAiInboxInput): Promise<AiInboxRecord>;
-  markProcessed(unitId: string, messageId: string, outputMessageId: string): Promise<void>;
+  markProcessed(unitId: string, messageId: string, outputMessageId: string | null): Promise<void>;
   markFailed(unitId: string, messageId: string, error: string): Promise<void>;
 }

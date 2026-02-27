@@ -27,7 +27,8 @@ export class AiReplyController {
         conversationId: payload.conversation_id,
         messageId: payload.message_id,
         outputMessageId: result.output_message_id,
-        duplicated: result.duplicated
+        duplicated: result.duplicated,
+        deliveryMode: result.delivery_mode
       },
       "AI reply processed"
     );

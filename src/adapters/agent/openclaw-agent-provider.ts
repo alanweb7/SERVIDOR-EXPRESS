@@ -19,6 +19,7 @@ export type OpenClawMessageContext = {
 export type OpenClawReply = {
   replyText: string;
   agentName: string;
+  deliveryMode: "ws" | "fallback-cli";
   providerMessageId?: string;
   correlationId?: string;
 };

@@ -56,7 +56,7 @@ export class SupabaseAiInboxRepository implements AiInboxRepository {
     return this.mapRow(row);
   }
 
-  async markProcessed(unitId: string, messageId: string, outputMessageId: string): Promise<void> {
+  async markProcessed(unitId: string, messageId: string, outputMessageId: string | null): Promise<void> {
     const current = await this.find(unitId, messageId);
     if (!current) return;
 

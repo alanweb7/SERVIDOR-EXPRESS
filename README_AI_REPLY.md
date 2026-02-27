@@ -45,6 +45,7 @@ Body obrigatorio:
 6. Persiste outbound em `chat_messages(is_me=true)`.
 7. Atualiza conversa e `ai_inbox(status=processed, output_message_id, attempts)`.
 8. Dispara outbound para o canal via dispatcher (`ai.reply.dispatch`).
+9. Retorna `delivery_mode` para diagnostico (`ws` ou `fallback-cli`).
 
 ## Configuracao obrigatoria
 - `DATA_PROVIDER=supabase`
@@ -54,6 +55,8 @@ Body obrigatorio:
 - `OPENCLAW_GATEWAY_TOKEN=<token-interno>`
 - `OPENCLAW_AGENT_ID=<agent-id-do-nolan>`
 - `OPENCLAW_SESSION_DEFAULT=agent:main:main`
+- `OPENCLAW_ENABLE_FALLBACK_CLI=true|false`
+- `OPENCLAW_FALLBACK_CONTAINER=openclaw-cvsy-openclaw-1`
 - `OPENCLAW_CONNECT_TIMEOUT_MS=15000`
 - `OPENCLAW_DEBUG=false`
 - `AI_TRANSIENT_MAX_RETRIES=1`

@@ -24,6 +24,8 @@ type LoggerLike = {
 export type AiReplyResult = {
   success: true;
   duplicated: boolean;
+  delivery_mode: "ws" | "fallback-cli";
+  deliveryMode: "ws" | "fallback-cli";
   conversation_id: string;
   input_message_id: string;
   output_message_id: string | null;
@@ -74,6 +76,8 @@ export class AiReplyService {
       return {
         success: true,
         duplicated: true,
+        delivery_mode: existing.outputMessageId ? "ws" : "fallback-cli",
+        deliveryMode: existing.outputMessageId ? "ws" : "fallback-cli",
         conversation_id: input.conversation_id,
         input_message_id: input.message_id,
         output_message_id: existing.outputMessageId ?? null,
@@ -134,44 +138,57 @@ export class AiReplyService {
       );
 
       currentPhase = "persist_out";
-      logger.info({ ...logBase, phase: currentPhase }, "Persisting outbound message");
-      const output =
-        (await this.chatMessageRepository.findByRemoteId(input.conversation_id, input.unit_id, outputRemoteId)) ??
-        (await this.chatMessageRepository.create({
-          conversationId: input.conversation_id,
-          unitId: input.unit_id,
-          senderName: providerReply.agentName,
-          content: providerReply.replyText,
-          isMe: true,
-          messageType: "text",
-          remoteId: outputRemoteId
-        }));
-
-      await this.conversationRepository.updateAfterAiReply(input.conversation_id, input.unit_id, providerReply.replyText);
-      await this.aiInboxRepository.markProcessed(input.unit_id, input.message_id, output.id);
-
-      currentPhase = "dispatch_out";
-      logger.info({ ...logBase, phase: currentPhase }, "Dispatching outbound message");
-      await this.withRetries(
-        () =>
-          this.outboundDispatcher.dispatchReply({
-            unitId: input.unit_id,
-            conversationId: input.conversation_id,
-            inputMessageId: input.message_id,
-            outputMessageId: output.id,
-            source: input.source,
-            text: providerReply.replyText,
-            metadata: input.metadata
-          }),
-        (error) => error instanceof DispatchOutboundError && error.retryable
+      logger.info(
+        { ...logBase, phase: currentPhase, delivery_mode: providerReply.deliveryMode },
+        "Persisting outbound message"
       );
+      let outputId: string | null = null;
+      if (providerReply.replyText.trim().length > 0) {
+        const output =
+          (await this.chatMessageRepository.findByRemoteId(input.conversation_id, input.unit_id, outputRemoteId)) ??
+          (await this.chatMessageRepository.create({
+            conversationId: input.conversation_id,
+            unitId: input.unit_id,
+            senderName: providerReply.agentName,
+            content: providerReply.replyText,
+            isMe: true,
+            messageType: "text",
+            remoteId: outputRemoteId
+          }));
+
+        outputId = output.id;
+        await this.conversationRepository.updateAfterAiReply(input.conversation_id, input.unit_id, providerReply.replyText);
+
+        currentPhase = "dispatch_out";
+        logger.info(
+          { ...logBase, phase: currentPhase, delivery_mode: providerReply.deliveryMode },
+          "Dispatching outbound message"
+        );
+        await this.withRetries(
+          () =>
+            this.outboundDispatcher.dispatchReply({
+              unitId: input.unit_id,
+              conversationId: input.conversation_id,
+              inputMessageId: input.message_id,
+              outputMessageId: output.id,
+              source: input.source,
+              text: providerReply.replyText,
+              metadata: input.metadata
+            }),
+          (error) => error instanceof DispatchOutboundError && error.retryable
+        );
+      }
+
+      await this.aiInboxRepository.markProcessed(input.unit_id, input.message_id, outputId);
 
       return {
         success: true,
         duplicated: false,
+        delivery_mode: providerReply.deliveryMode,
+        deliveryMode: providerReply.deliveryMode,
         conversation_id: input.conversation_id,
         input_message_id: input.message_id,
-        output_message_id: output.id,
+        output_message_id: outputId,
         agent_name: providerReply.agentName,
         reply_text: providerReply.replyText
       };

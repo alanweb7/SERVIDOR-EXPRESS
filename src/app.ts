@@ -30,7 +30,8 @@ import type { ChatMessageRepository } from "./repositories/interfaces/chat-messa
 import type { OpenClawAgentProvider } from "./adapters/agent/openclaw-agent-provider.js";
 import { OpenClawProviderError } from "./adapters/agent/openclaw-agent-provider.js";
 import type { OutboundDispatcher } from "./adapters/outbound/outbound-dispatcher.js";
-import { OpenClawGatewayClient } from "./integrations/openclawGatewayClient.js";
+import { OpenClawClient } from "./integrations/openclaw/client.js";
+import { OpenClawFallbackCliExecutor } from "./integrations/openclaw/fallback.js";
 
 export type AppDeps = {
   dedupRepository: MessageDedupRepository;
@@ -156,16 +157,22 @@ function createOpenClawProvider(): OpenClawAgentProvider {
     };
   }
 
-  const gatewayClient = new OpenClawGatewayClient({
+  const gatewayClient = new OpenClawClient({
     url: env.OPENCLAW_GATEWAY_URL,
     token: env.OPENCLAW_GATEWAY_TOKEN,
     agentId: env.OPENCLAW_AGENT_ID,
     timeoutMs: env.OPENCLAW_CONNECT_TIMEOUT_MS,
     debug: env.OPENCLAW_DEBUG
   });
+  const fallbackExecutor = new OpenClawFallbackCliExecutor({
+    enabled: env.OPENCLAW_ENABLE_FALLBACK_CLI,
+    containerName: env.OPENCLAW_FALLBACK_CONTAINER,
+    timeoutMs: env.OPENCLAW_CONNECT_TIMEOUT_MS
+  });
 
   return new OpenClawWsAgentProvider({
     gatewayClient,
+    fallbackExecutor,
     sessionDefault: env.OPENCLAW_SESSION_DEFAULT
   });
 }

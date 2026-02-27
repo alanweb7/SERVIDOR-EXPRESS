@@ -15,6 +15,11 @@ const envSchema = z.object({
   OPENCLAW_GATEWAY_TOKEN: z.string().optional(),
   OPENCLAW_AGENT_ID: z.string().min(1).optional(),
   OPENCLAW_SESSION_DEFAULT: z.string().optional(),
+  OPENCLAW_ENABLE_FALLBACK_CLI: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((value) => value === "true"),
+  OPENCLAW_FALLBACK_CONTAINER: z.string().default("openclaw-cvsy-openclaw-1"),
   OPENCLAW_CONNECT_TIMEOUT_MS: z.coerce.number().int().positive().default(15000),
   OPENCLAW_DEBUG: z.enum(["true", "false"]).default("false").transform((value) => value === "true"),
   DATA_PROVIDER: z.enum(["inmemory", "supabase"]).default("inmemory"),
