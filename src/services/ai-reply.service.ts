@@ -28,6 +28,7 @@ export type AiReplyResult = {
   input_message_id: string;
   output_message_id: string | null;
   agent_name: string;
+  reply_text: string;
 };
 
 export class AiReplyService {
@@ -57,13 +58,23 @@ export class AiReplyService {
     const existing = await this.aiInboxRepository.find(input.unit_id, input.message_id);
     if (existing?.status === "processed") {
       logger.info({ ...logBase, phase: "persist_in" satisfies Phase }, "Inbound already processed");
+      const duplicatedText = existing.outputMessageId
+        ? (
+            await this.chatMessageRepository.findById(
+              existing.outputMessageId,
+              input.conversation_id,
+              input.unit_id
+            )
+          )?.content ?? ""
+        : "";
       return {
         success: true,
         duplicated: true,
         conversation_id: input.conversation_id,
         input_message_id: input.message_id,
         output_message_id: existing.outputMessageId ?? null,
-        agent_name: "Nolan Neo"
+        agent_name: "Nolan Neo",
+        reply_text: duplicatedText
       };
     }
 
@@ -156,7 +167,8 @@ export class AiReplyService {
         conversation_id: input.conversation_id,
         input_message_id: input.message_id,
         output_message_id: output.id,
-        agent_name: providerReply.agentName
+        agent_name: providerReply.agentName,
+        reply_text: providerReply.replyText
       };
     } catch (error) {
       const sanitized = this.sanitizeError(error);

@@ -6,11 +6,12 @@ export const aiReplySchema = z.object({
   message_id: z.string().min(1),
   text: z.string().min(1),
   sender_name: z.string().min(1),
-  source: z.enum(["internal_panel", "external_fastify", "internal_ai"]).default("internal_panel"),
+  source: z.string().min(1),
   timestamp: z.string().datetime(),
   metadata: z
     .object({
       channel: z.string().optional(),
+      remote_jid: z.string().optional(),
       attachments: z.array(z.unknown()).optional().default([])
     })
     .optional()

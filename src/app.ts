@@ -114,7 +114,7 @@ export function createApp(partialDeps?: Partial<AppDeps>): FastifyInstance {
   app.setErrorHandler((error, request, reply) => {
     if (error instanceof ZodError) {
       request.log.warn({ issues: error.issues }, "Erro de validacao");
-      reply.code(400).send(fail("VALIDATION_ERROR", "Payload invalido", { request_id: request.id }));
+      reply.code(422).send(fail("VALIDATION_ERROR", "Payload invalido", { request_id: request.id }));
       return;
     }
 
