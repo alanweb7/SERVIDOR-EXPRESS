@@ -1,4 +1,5 @@
-import { randomUUID } from "node:crypto";
+import { randomUUID, sign as signPayload } from "node:crypto";
+import { OpenClawDeviceIdentityStore, type DeviceIdentity } from "./deviceIdentity.js";
 
 type GatewayFrame = Record<string, unknown>;
 
@@ -24,6 +25,8 @@ export type OpenClawWsClientOptions = {
   url: string;
   token: string;
   agentId: string;
+  deviceId: string;
+  deviceIdentityPath: string;
   timeoutMs: number;
   debug: boolean;
   protocolVersion?: number;
@@ -46,11 +49,17 @@ export class OpenClawClient {
   private readonly pending = new Map<string, (frame: GatewayFrame) => void>();
   private connectReqId: string | null = null;
   private isConnected = false;
+  private challengeNonce: string | null = null;
+  private deviceIdentity: DeviceIdentity | null = null;
+  private readonly identityStore: OpenClawDeviceIdentityStore;
 
-  constructor(private readonly options: OpenClawWsClientOptions) {}
+  constructor(private readonly options: OpenClawWsClientOptions) {
+    this.identityStore = new OpenClawDeviceIdentityStore(options.deviceIdentityPath);
+  }
 
   async connect(): Promise<void> {
     if (this.isConnected && this.socket) return;
+    await this.ensureDeviceIdentity();
 
     const maxAttempts = 5;
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
@@ -116,6 +125,7 @@ export class OpenClawClient {
     }
     this.pending.clear();
     this.isConnected = false;
+    this.challengeNonce = null;
   }
 
   private async openSocket(): Promise<void> {
@@ -144,6 +154,11 @@ export class OpenClawClient {
           this.handleIncomingFrame(frame);
 
           if (frame["event"] === "connect.challenge") {
+            const nonce =
+              this.readNestedString(frame, "payload", "nonce") ??
+              this.readNestedString(frame, "data", "nonce") ??
+              this.readString(frame, "nonce");
+            this.challengeNonce = nonce;
             this.sendConnectFrame();
           }
 
@@ -188,6 +203,13 @@ export class OpenClawClient {
 
   private sendConnectFrame(): void {
     const protocolVersion = this.options.protocolVersion ?? 3;
+    const identity = this.deviceIdentity;
+    const nonce = this.challengeNonce ?? "";
+    const signature =
+      identity && nonce
+        ? signPayload(null, Buffer.from(nonce, "utf8"), identity.privateKeyPem).toString("base64")
+        : "";
+
     this.connectReqId = this.sendRequest("connect", {
       minProtocol: protocolVersion,
       maxProtocol: protocolVersion,
@@ -200,9 +222,24 @@ export class OpenClawClient {
       auth: {
         token: this.options.token
       },
+      device:
+        identity && nonce
+          ? {
+              id: identity.deviceId,
+              nonce,
+              publicKey: identity.publicKeyPem,
+              signature,
+              algorithm: "ed25519"
+            }
+          : undefined,
       role: "operator",
       scopes: ["operator.write"]
     });
+  }
+
+  private async ensureDeviceIdentity(): Promise<void> {
+    if (this.deviceIdentity) return;
+    this.deviceIdentity = await this.identityStore.loadOrCreate(this.options.deviceId);
   }
 
   private sendFrame(frame: GatewayFrame): void {
@@ -308,4 +345,3 @@ export class OpenClawClient {
     console.log(`[openclaw-ws] ${message}`);
   }
 }
-

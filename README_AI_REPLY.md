@@ -55,6 +55,8 @@ Body obrigatorio:
 - `OPENCLAW_GATEWAY_TOKEN=<token-interno>`
 - `OPENCLAW_AGENT_ID=<agent-id-do-nolan>`
 - `OPENCLAW_SESSION_DEFAULT=agent:main:main`
+- `OPENCLAW_DEVICE_ID=lab-api-main`
+- `OPENCLAW_DEVICE_IDENTITY_PATH=/app/.openclaw/device-identity.json`
 - `OPENCLAW_ENABLE_FALLBACK_CLI=true|false`
 - `OPENCLAW_FALLBACK_CONTAINER=openclaw-cvsy-openclaw-1`
 - `OPENCLAW_CONNECT_TIMEOUT_MS=15000`

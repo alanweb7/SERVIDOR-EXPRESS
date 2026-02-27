@@ -15,6 +15,8 @@ const envSchema = z.object({
   OPENCLAW_GATEWAY_TOKEN: z.string().optional(),
   OPENCLAW_AGENT_ID: z.string().min(1).optional(),
   OPENCLAW_SESSION_DEFAULT: z.string().optional(),
+  OPENCLAW_DEVICE_ID: z.string().min(1).default("lab-api-main"),
+  OPENCLAW_DEVICE_IDENTITY_PATH: z.string().default("/app/.openclaw/device-identity.json"),
   OPENCLAW_ENABLE_FALLBACK_CLI: z
     .enum(["true", "false"])
     .default("false")

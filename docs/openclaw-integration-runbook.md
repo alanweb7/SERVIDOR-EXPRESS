@@ -12,6 +12,8 @@
 - `OPENCLAW_GATEWAY_TOKEN=...`
 - `OPENCLAW_AGENT_ID=main`
 - `OPENCLAW_SESSION_DEFAULT=agent:main:main`
+- `OPENCLAW_DEVICE_ID=lab-api-main`
+- `OPENCLAW_DEVICE_IDENTITY_PATH=/app/.openclaw/device-identity.json`
 - `OPENCLAW_ENABLE_FALLBACK_CLI=true`
 - `OPENCLAW_FALLBACK_CONTAINER=openclaw-cvsy-openclaw-1`
 - `OPENCLAW_CONNECT_TIMEOUT_MS=15000`
@@ -30,12 +32,13 @@ docker exec -it openclaw-cvsy-openclaw-1 sh -lc \
 
 ## Pairing (modo definitivo)
 1. Executar cliente WS com device identity ativo.
+2. O arquivo de identidade e chave privada e criado em `OPENCLAW_DEVICE_IDENTITY_PATH`.
 2. Capturar request de pairing no gateway.
 3. Aprovar no OpenClaw:
 ```bash
 openclaw devices approve <requestId>
 ```
-4. Revalidar envio WS sem fallback.
+4. Revalidar envio WS sem fallback (`delivery_mode=ws`).
 
 ## Diagnostico rapido
 - `missing scope: operator.write`: token sem escopo de escrita.

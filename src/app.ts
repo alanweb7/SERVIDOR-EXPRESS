@@ -161,6 +161,8 @@ function createOpenClawProvider(): OpenClawAgentProvider {
     url: env.OPENCLAW_GATEWAY_URL,
     token: env.OPENCLAW_GATEWAY_TOKEN,
     agentId: env.OPENCLAW_AGENT_ID,
+    deviceId: env.OPENCLAW_DEVICE_ID,
+    deviceIdentityPath: env.OPENCLAW_DEVICE_IDENTITY_PATH,
     timeoutMs: env.OPENCLAW_CONNECT_TIMEOUT_MS,
     debug: env.OPENCLAW_DEBUG
   });
