@@ -114,7 +114,7 @@ export class OpenClawAgentService {
     const err = error as {
       code?: string | number;
       killed?: boolean;
-      signal?: NodeJS.Signals | null;
+      signal?: string | null;
       stderr?: string;
       stdout?: string;
     };
