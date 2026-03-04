@@ -27,7 +27,7 @@ const envSchema = z.object({
   OPENCLAW_AGENT_CONTAINER_NAME: z.string().default("openclaw-jsyu-openclaw-1"),
   OPENCLAW_AGENT_DOCKER_USER: z.string().default("node"),
   OPENCLAW_AGENT_SESSION_DEFAULT: z.string().default("n8n-main"),
-  OPENCLAW_AGENT_DEFAULT: z.string().default("main"),
+  OPENCLAW_AGENT_DEFAULT: z.string().optional(),
   OPENCLAW_AGENT_COMMAND_TIMEOUT_MS: z.coerce.number().int().positive().default(120000),
   DATA_PROVIDER: z.enum(["inmemory", "supabase"]).default("inmemory"),
   SUPABASE_URL: z.string().url().optional(),

@@ -21,7 +21,8 @@ type OpenClawAgentSendResult = {
 export class OpenClawAgentService {
   async send(input: OpenClawAgentSendInput): Promise<OpenClawAgentSendResult> {
     const sessionId = this.sanitizeToken(input.sessionId ?? env.OPENCLAW_AGENT_SESSION_DEFAULT, "sessionId");
-    const agent = this.sanitizeToken(input.agent ?? env.OPENCLAW_AGENT_DEFAULT, "agent");
+    const rawAgent = input.agent ?? env.OPENCLAW_AGENT_DEFAULT;
+    const agent = rawAgent ? this.sanitizeToken(rawAgent, "agent") : null;
     const container = this.sanitizeToken(input.container ?? env.OPENCLAW_AGENT_CONTAINER_NAME, "container");
     const dockerUser = this.sanitizeToken(env.OPENCLAW_AGENT_DOCKER_USER, "dockerUser");
     const message = input.message;
@@ -35,12 +36,13 @@ export class OpenClawAgentService {
       "agent",
       "--session-id",
       sessionId,
-      "--agent",
-      agent,
       "--message",
       message,
       "--json"
     ];
+    if (agent) {
+      args.splice(9, 0, "--agent", agent);
+    }
 
     try {
       const { stdout } = await execFileAsync("docker", args, {
@@ -51,7 +53,7 @@ export class OpenClawAgentService {
       return {
         request: {
           sessionId,
-          agent,
+          agent: agent ?? "",
           container,
           message
         },
