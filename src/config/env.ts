@@ -28,6 +28,8 @@ const envSchema = z.object({
   OPENCLAW_AGENT_DOCKER_USER: z.string().default("node"),
   OPENCLAW_AGENT_SESSION_DEFAULT: z.string().default("n8n-main"),
   OPENCLAW_AGENT_DEFAULT: z.string().optional(),
+  OPENCLAW_WEBHOOK_AGENT: z.string().default("interpreter"),
+  OPENCLAW_WEBHOOK_SESSION_ID: z.string().default("n8n-interpreter"),
   OPENCLAW_AGENT_COMMAND_TIMEOUT_MS: z.coerce.number().int().positive().default(120000),
   DATA_PROVIDER: z.enum(["inmemory", "supabase"]).default("inmemory"),
   SUPABASE_URL: z.string().url().optional(),

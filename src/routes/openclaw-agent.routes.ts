@@ -11,7 +11,7 @@ export async function openClawAgentRoutes(app: FastifyInstance): Promise<void> {
     {
       preHandler: verifyInternalAuth
     },
-    controller.send.bind(controller)
+    controller.sendWebhook.bind(controller)
   );
 
   app.post(
