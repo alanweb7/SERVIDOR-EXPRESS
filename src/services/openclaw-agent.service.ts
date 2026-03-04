@@ -45,10 +45,7 @@ export class OpenClawAgentService {
     }
 
     try {
-      const { stdout } = await execFileAsync("docker", args, {
-        timeout: env.OPENCLAW_AGENT_COMMAND_TIMEOUT_MS,
-        maxBuffer: 1024 * 1024
-      });
+      const { stdout } = await this.execute(args);
 
       return {
         request: {
@@ -61,8 +58,52 @@ export class OpenClawAgentService {
         raw: stdout
       };
     } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
-      const details = this.extractErrorDetails(error);
+      let finalError: unknown = error;
+
+      if (agent) {
+        const details = this.extractErrorDetails(error);
+        const stderr = details.stderr.toLowerCase();
+        const shouldRetryWithoutAgent =
+          stderr.includes("unknown option") ||
+          stderr.includes("unknown flag") ||
+          stderr.includes("unexpected argument") ||
+          stderr.includes("--agent");
+
+        if (shouldRetryWithoutAgent) {
+          const fallbackArgs = [
+            "exec",
+            "-u",
+            dockerUser,
+            container,
+            "openclaw",
+            "agent",
+            "--session-id",
+            sessionId,
+            "--message",
+            message,
+            "--json"
+          ];
+
+          try {
+            const { stdout } = await this.execute(fallbackArgs);
+            return {
+              request: {
+                sessionId,
+                agent: "",
+                container,
+                message
+              },
+              openclaw: this.parseJson(stdout),
+              raw: stdout
+            };
+          } catch (fallbackError) {
+            finalError = fallbackError;
+          }
+        }
+      }
+
+      const reason = finalError instanceof Error ? finalError.message : String(finalError);
+      const details = this.extractErrorDetails(finalError);
 
       if (details.timedOut) {
         throw new HttpError(
@@ -86,6 +127,13 @@ export class OpenClawAgentService {
         }
       );
     }
+  }
+
+  private execute(args: string[]): Promise<{ stdout: string }> {
+    return execFileAsync("docker", args, {
+      timeout: env.OPENCLAW_AGENT_COMMAND_TIMEOUT_MS,
+      maxBuffer: 1024 * 1024
+    });
   }
 
   private sanitizeToken(value: string, field: string): string {
