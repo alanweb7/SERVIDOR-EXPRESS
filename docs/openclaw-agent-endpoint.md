@@ -1,6 +1,7 @@
-# OpenClaw Agent Endpoint
+﻿# OpenClaw Agent Endpoint
 
-## Rota
+## Rotas
+- `POST /v1/webhook/agent/send`
 - `POST /api/v1/openclaw/agent/send`
 
 ## Auth
@@ -10,30 +11,45 @@
 Encapsular este comando via HTTP:
 
 ```bash
-docker exec -u node openclaw-jsyu-openclaw-1 openclaw agent --session-id n8n-main --message "Quem e voce?" --json
+docker exec -u node openclaw-jsyu-openclaw-1 openclaw agent --agent interpreter --session-id n8n-interpreter --message "Quem e voce?" --json
 ```
 
-Comportamento dinamico:
-- `agent`: pode vir no payload; se ausente usa env.
-- `message`: obrigatorio no payload.
-- `container`: pode vir no payload; se ausente usa env.
+## Parametros do payload
 
-## Payload
+Payload base:
 
 ```json
 {
   "message": "Quem e voce?",
-  "sessionId": "n8n-main",
-  "agent": "main",
+  "sessionId": "n8n-interpreter",
+  "agent": "interpreter",
   "container": "openclaw-jsyu-openclaw-1"
 }
 ```
 
-Campos:
-- `message` obrigatorio
-- `sessionId` opcional (default env)
-- `agent` opcional (default env)
-- `container` opcional (default env)
+Obrigatorio:
+- `message`
+
+Opcionais:
+- `sessionId`
+- `agent`
+- `container`
+
+## Fallback por env (quando omitir no payload)
+
+### Para `POST /v1/webhook/agent/send`
+- `agent` -> `OPENCLAW_WEBHOOK_AGENT`
+- `sessionId` -> `OPENCLAW_WEBHOOK_SESSION_ID`
+- `container` -> `OPENCLAW_AGENT_CONTAINER_NAME`
+
+### Para `POST /api/v1/openclaw/agent/send`
+- `agent` -> `OPENCLAW_AGENT_DEFAULT`
+- `sessionId` -> `OPENCLAW_AGENT_SESSION_DEFAULT`
+- `container` -> `OPENCLAW_AGENT_CONTAINER_NAME`
+
+Sempre via env:
+- usuario docker -> `OPENCLAW_AGENT_DOCKER_USER`
+- timeout -> `OPENCLAW_AGENT_COMMAND_TIMEOUT_MS`
 
 ## Env utilizados
 
@@ -41,17 +57,28 @@ Campos:
 OPENCLAW_AGENT_CONTAINER_NAME=openclaw-jsyu-openclaw-1
 OPENCLAW_AGENT_DOCKER_USER=node
 OPENCLAW_AGENT_SESSION_DEFAULT=n8n-main
-OPENCLAW_AGENT_DEFAULT=main
+OPENCLAW_AGENT_DEFAULT=
+OPENCLAW_WEBHOOK_AGENT=interpreter
+OPENCLAW_WEBHOOK_SESSION_ID=n8n-interpreter
 OPENCLAW_AGENT_COMMAND_TIMEOUT_MS=120000
 ```
 
-## Exemplo curl
+## Exemplo curl (webhook)
+
+```bash
+curl -s -X POST http://localhost:3000/v1/webhook/agent/send \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer change-me-ai-token" \
+  -d '{"message":"Quem e voce?"}'
+```
+
+## Exemplo curl (lab/dinamico)
 
 ```bash
 curl -s -X POST http://localhost:3000/api/v1/openclaw/agent/send \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer change-me-ai-token" \
-  -d '{"message":"Quem e voce?"}'
+  -d '{"message":"Quem e voce?","agent":"interpreter","sessionId":"n8n-interpreter"}'
 ```
 
 ## Retorno de sucesso
@@ -61,8 +88,8 @@ curl -s -X POST http://localhost:3000/api/v1/openclaw/agent/send \
   "ok": true,
   "data": {
     "request": {
-      "sessionId": "n8n-main",
-      "agent": "main",
+      "sessionId": "n8n-interpreter",
+      "agent": "interpreter",
       "container": "openclaw-jsyu-openclaw-1",
       "message": "Quem e voce?"
     },
