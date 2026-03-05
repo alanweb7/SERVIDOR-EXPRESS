@@ -9,7 +9,7 @@ export class MessageController {
   async inbound(request: FastifyRequest, reply: FastifyReply) {
     const payload = inboundWebhookSchema.parse(request.body);
     request.log.info({ body: payload }, "Inbound webhook recebido");
-    const result = await this.messageService.processInbound(payload);
+    const result = await this.messageService.processInbound(payload, request.log);
     return reply.code(result.duplicate ? 200 : 202).send(ok(result));
   }
 
