@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+﻿import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { env } from "../config/env.js";
 import type { OpenClawAgentSendInput } from "../schemas/openclaw-agent.schemas.js";
@@ -40,8 +40,9 @@ export class OpenClawAgentService {
       message,
       "--json"
     ];
+
     if (agent) {
-      args.splice(9, 0, "--agent", agent);
+      args.splice(8, 0, "--agent", agent);
     }
 
     try {
@@ -67,7 +68,8 @@ export class OpenClawAgentService {
           stderr.includes("unknown option") ||
           stderr.includes("unknown flag") ||
           stderr.includes("unexpected argument") ||
-          stderr.includes("--agent");
+          stderr.includes("--agent") ||
+          stderr.includes("too many arguments");
 
         if (shouldRetryWithoutAgent) {
           const fallbackArgs = [
@@ -106,26 +108,16 @@ export class OpenClawAgentService {
       const details = this.extractErrorDetails(finalError);
 
       if (details.timedOut) {
-        throw new HttpError(
-          504,
-          "openclaw_command_timeout",
-          "Timeout ao executar comando OpenClaw",
-          {
-            reason,
-            ...details
-          }
-        );
-      }
-
-      throw new HttpError(
-        502,
-        "openclaw_command_failed",
-        "Falha ao executar comando OpenClaw",
-        {
+        throw new HttpError(504, "openclaw_command_timeout", "Timeout ao executar comando OpenClaw", {
           reason,
           ...details
-        }
-      );
+        });
+      }
+
+      throw new HttpError(502, "openclaw_command_failed", "Falha ao executar comando OpenClaw", {
+        reason,
+        ...details
+      });
     }
   }
 
