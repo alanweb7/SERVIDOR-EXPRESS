@@ -222,11 +222,14 @@ export class AdminManagerService {
       const model = input.model ?? current.model;
       const channel = input.channel ?? current.channel;
 
-      const create = await this.runCreateWithTolerance({
-        agent: slug,
-        workspace,
-        model
-      });
+      const agentExists = await this.checkAgentExists(slug);
+      const create = agentExists
+        ? { skipped: true, reason: "agent_already_exists" }
+        : await this.runCreateWithTolerance({
+            agent: slug,
+            workspace,
+            model
+          });
 
       const identity = await this.setIdentity({
         agent: slug,
@@ -367,15 +370,33 @@ export class AdminManagerService {
           reason.includes("already") ||
           reason.includes("exists") ||
           reason.includes("duplicate") ||
-          reason.includes("bound")
+          reason.includes("bound") ||
+          reason.includes("conflicts") ||
+          reason.includes("accountid=default")
         ) {
           return {
             skipped: true,
-            reason: "binding_already_exists"
+            reason: "binding_conflict_or_already_exists",
+            details: error.cause
           };
         }
       }
       throw error;
+    }
+  }
+
+  private async checkAgentExists(agentId: string): Promise<boolean> {
+    try {
+      const list = await this.listAgents();
+      const output = (list as { output?: unknown }).output;
+      if (!Array.isArray(output)) return false;
+      return output.some((item) => {
+        if (!item || typeof item !== "object") return false;
+        const record = item as Record<string, unknown>;
+        return record.id === agentId || record.name === agentId;
+      });
+    } catch {
+      return false;
     }
   }
 
