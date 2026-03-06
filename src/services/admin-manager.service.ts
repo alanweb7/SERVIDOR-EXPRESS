@@ -124,113 +124,143 @@ export class AdminManagerService {
   }
 
   async listPersistentAgents() {
-    const client = this.getDbClient();
-    const params = new URLSearchParams();
-    params.set("select", "*");
-    params.set("order", "updated_at.desc");
-    const rows = (await client.select("openclaw_agents_registry", params)) as PersistentAgentRow[];
-    return rows;
+    try {
+      const client = this.getDbClient();
+      const params = new URLSearchParams();
+      params.set("select", "*");
+      params.set("order", "updated_at.desc");
+      const rows = (await client.select("openclaw_agents_registry", params)) as PersistentAgentRow[];
+      return rows;
+    } catch (error) {
+      this.throwRegistryDbError("list", error);
+    }
   }
 
   async upsertPersistentAgent(input: AdminPersistentAgentUpsertInput) {
-    const client = this.getDbClient();
-    const slug = this.sanitize(input.slug, "slug");
-    const nowIso = new Date().toISOString();
-    const existing = await this.findPersistentBySlug(slug);
+    try {
+      const client = this.getDbClient();
+      const slug = this.sanitize(input.slug, "slug");
+      const nowIso = new Date().toISOString();
+      const existing = await this.findPersistentBySlug(slug);
 
-    const payload = {
-      slug,
-      name: input.name,
-      persona: input.persona,
-      identity_name: input.identity_name,
-      identity_emoji: input.identity_emoji ?? null,
-      workspace: input.workspace,
-      model: input.model,
-      channel: input.channel,
-      system_prompt: input.system_prompt ?? null,
-      welcome_message: input.welcome_message ?? null,
-      fallback_message: input.fallback_message ?? null,
-      menu_options: input.menu_options,
-      transfer_to_human: input.transfer_to_human,
-      active: input.active,
-      metadata: input.metadata,
-      updated_at: nowIso
-    };
-
-    let row: PersistentAgentRow;
-    if (existing) {
-      const filters = new URLSearchParams();
-      filters.set("id", `eq.${existing.id}`);
-      const updated = (await client.update("openclaw_agents_registry", filters, payload)) as PersistentAgentRow[];
-      row = updated[0] ?? { ...existing, ...payload, updated_at: nowIso };
-    } else {
-      const inserted = (await client.insert("openclaw_agents_registry", payload)) as PersistentAgentRow[];
-      row = inserted[0] as PersistentAgentRow;
-    }
-
-    let sync: unknown = null;
-    if (input.sync_openclaw) {
-      sync = await this.syncPersistentAgent({
+      const payload = {
         slug,
-        channel: input.channel,
+        name: input.name,
+        persona: input.persona,
+        identity_name: input.identity_name,
+        identity_emoji: input.identity_emoji ?? null,
         workspace: input.workspace,
-        model: input.model
-      });
-    }
+        model: input.model,
+        channel: input.channel,
+        system_prompt: input.system_prompt ?? null,
+        welcome_message: input.welcome_message ?? null,
+        fallback_message: input.fallback_message ?? null,
+        menu_options: input.menu_options,
+        transfer_to_human: input.transfer_to_human,
+        active: input.active,
+        metadata: input.metadata,
+        updated_at: nowIso
+      };
 
-    return {
-      persisted: row,
-      sync
-    };
+      let row: PersistentAgentRow;
+      if (existing) {
+        const filters = new URLSearchParams();
+        filters.set("id", `eq.${existing.id}`);
+        const updated = (await client.update("openclaw_agents_registry", filters, payload)) as PersistentAgentRow[];
+        row = updated[0] ?? { ...existing, ...payload, updated_at: nowIso };
+      } else {
+        const inserted = (await client.insert("openclaw_agents_registry", payload)) as PersistentAgentRow[];
+        row = inserted[0] as PersistentAgentRow;
+      }
+
+      let sync: unknown = null;
+      let sync_error: { code: string; message: string; details?: unknown } | null = null;
+      if (input.sync_openclaw) {
+        try {
+          sync = await this.syncPersistentAgent({
+            slug,
+            channel: input.channel,
+            workspace: input.workspace,
+            model: input.model
+          });
+        } catch (error) {
+          if (error instanceof HttpError) {
+            sync_error = {
+              code: error.code,
+              message: error.message,
+              details: error.cause
+            };
+          } else {
+            sync_error = {
+              code: "openclaw_sync_failed",
+              message: "Falha ao sincronizar agente no OpenClaw",
+              details: error instanceof Error ? error.message : String(error)
+            };
+          }
+        }
+      }
+
+      return {
+        persisted: row,
+        sync,
+        sync_error
+      };
+    } catch (error) {
+      this.throwRegistryDbError("upsert", error);
+    }
   }
 
   async syncPersistentAgent(input: AdminPersistentAgentSyncInput) {
-    const slug = this.sanitize(input.slug, "slug");
-    const current = await this.findPersistentBySlug(slug);
-    if (!current) {
-      throw new HttpError(404, "agent_not_found", `Agente persistente nao encontrado: ${slug}`);
+    try {
+      const slug = this.sanitize(input.slug, "slug");
+      const current = await this.findPersistentBySlug(slug);
+      if (!current) {
+        throw new HttpError(404, "agent_not_found", `Agente persistente nao encontrado: ${slug}`);
+      }
+
+      const workspace = input.workspace ?? current.workspace;
+      const model = input.model ?? current.model;
+      const channel = input.channel ?? current.channel;
+
+      const create = await this.runCreateWithTolerance({
+        agent: slug,
+        workspace,
+        model
+      });
+
+      const identity = await this.setIdentity({
+        agent: slug,
+        name: current.identity_name || current.name,
+        emoji: current.identity_emoji ?? undefined
+      });
+
+      const bind = await this.bindChannel({
+        agent: slug,
+        bind: channel
+      });
+
+      const client = this.getDbClient();
+      const filters = new URLSearchParams();
+      filters.set("id", `eq.${current.id}`);
+      const nowIso = new Date().toISOString();
+      await client.update("openclaw_agents_registry", filters, {
+        workspace,
+        model,
+        channel,
+        last_synced_at: nowIso,
+        updated_at: nowIso
+      });
+
+      return {
+        slug,
+        create,
+        identity,
+        bind,
+        synced_at: nowIso
+      };
+    } catch (error) {
+      this.throwRegistryDbError("sync", error);
     }
-
-    const workspace = input.workspace ?? current.workspace;
-    const model = input.model ?? current.model;
-    const channel = input.channel ?? current.channel;
-
-    const create = await this.runCreateWithTolerance({
-      agent: slug,
-      workspace,
-      model
-    });
-
-    const identity = await this.setIdentity({
-      agent: slug,
-      name: current.identity_name || current.name,
-      emoji: current.identity_emoji ?? undefined
-    });
-
-    const bind = await this.bindChannel({
-      agent: slug,
-      bind: channel
-    });
-
-    const client = this.getDbClient();
-    const filters = new URLSearchParams();
-    filters.set("id", `eq.${current.id}`);
-    const nowIso = new Date().toISOString();
-    await client.update("openclaw_agents_registry", filters, {
-      workspace,
-      model,
-      channel,
-      last_synced_at: nowIso,
-      updated_at: nowIso
-    });
-
-    return {
-      slug,
-      create,
-      identity,
-      bind,
-      synced_at: nowIso
-    };
   }
 
   private async runOpenClaw(openclawArgs: string[]) {
@@ -289,13 +319,17 @@ export class AdminManagerService {
   }
 
   private async findPersistentBySlug(slug: string): Promise<PersistentAgentRow | null> {
-    const client = this.getDbClient();
-    const params = new URLSearchParams();
-    params.set("select", "*");
-    params.set("slug", `eq.${slug}`);
-    params.set("limit", "1");
-    const rows = (await client.select("openclaw_agents_registry", params)) as PersistentAgentRow[];
-    return rows[0] ?? null;
+    try {
+      const client = this.getDbClient();
+      const params = new URLSearchParams();
+      params.set("select", "*");
+      params.set("slug", `eq.${slug}`);
+      params.set("limit", "1");
+      const rows = (await client.select("openclaw_agents_registry", params)) as PersistentAgentRow[];
+      return rows[0] ?? null;
+    } catch (error) {
+      this.throwRegistryDbError("find_by_slug", error);
+    }
   }
 
   private async runCreateWithTolerance(input: { agent: string; workspace: string; model: string }) {
@@ -318,5 +352,30 @@ export class AdminManagerService {
       }
       throw error;
     }
+  }
+
+  private throwRegistryDbError(operation: string, error: unknown): never {
+    if (error instanceof HttpError) {
+      throw error;
+    }
+
+    const message = error instanceof Error ? error.message : String(error);
+    const normalized = message.toLowerCase();
+
+    if (normalized.includes("openclaw_agents_registry") && normalized.includes("does not exist")) {
+      throw new HttpError(
+        503,
+        "admin_registry_missing",
+        "Tabela openclaw_agents_registry nao existe. Execute a migration no banco.",
+        { operation, reason: message.slice(0, 1500) }
+      );
+    }
+
+    throw new HttpError(
+      502,
+      "admin_registry_db_error",
+      "Falha ao acessar persistencia de agentes",
+      { operation, reason: message.slice(0, 1500) }
+    );
   }
 }
