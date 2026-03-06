@@ -2,7 +2,7 @@
 
 export const adminAgentCreateSchema = z.object({
   agent: z.string().min(1),
-  workspace: z.string().min(1).default("/data/.openclaw/workspace"),
+  workspace: z.string().min(1).optional(),
   model: z.string().min(1).default("openai-codex/gpt-5.3-codex"),
   non_interactive: z.boolean().default(true)
 });
@@ -10,7 +10,8 @@ export const adminAgentCreateSchema = z.object({
 export const adminAgentIdentitySchema = z.object({
   agent: z.string().min(1),
   name: z.string().min(1),
-  emoji: z.string().min(1).optional()
+  emoji: z.string().min(1).optional(),
+  theme: z.string().min(1).optional()
 });
 
 export const adminAgentBindSchema = z.object({
@@ -30,7 +31,7 @@ export const adminAgentTemplateSchema = z.object({
   fallback_message: z.string().min(1),
   transfer_to_human: z.boolean().default(true),
   active: z.boolean().default(true),
-  workspace: z.string().min(1).default("/data/.openclaw/workspace"),
+  workspace: z.string().min(1).optional(),
   model: z.string().min(1).default("openai-codex/gpt-5.3-codex")
 });
 
@@ -40,8 +41,9 @@ export const adminPersistentAgentUpsertSchema = z.object({
   persona: z.string().min(1),
   identity_name: z.string().min(1),
   identity_emoji: z.string().min(1).optional(),
+  identity_theme: z.string().min(1).optional(),
   channel: z.string().min(1).default("whatsapp"),
-  workspace: z.string().min(1).default("/data/.openclaw/workspace"),
+  workspace: z.string().min(1).optional(),
   model: z.string().min(1).default("openai-codex/gpt-5.3-codex"),
   system_prompt: z.string().optional(),
   welcome_message: z.string().optional(),
@@ -57,7 +59,8 @@ export const adminPersistentAgentSyncSchema = z.object({
   slug: z.string().min(1),
   channel: z.string().min(1).optional(),
   workspace: z.string().min(1).optional(),
-  model: z.string().min(1).optional()
+  model: z.string().min(1).optional(),
+  theme: z.string().min(1).optional()
 });
 
 export type AdminAgentCreateInput = z.infer<typeof adminAgentCreateSchema>;

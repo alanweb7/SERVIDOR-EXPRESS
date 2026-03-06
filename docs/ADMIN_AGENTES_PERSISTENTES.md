@@ -18,6 +18,7 @@ Campos principais:
 - `name` (nome de exibição)
 - `persona`
 - `identity_name` / `identity_emoji`
+- `identity_theme`
 - `channel`
 - `workspace`
 - `model`
@@ -51,8 +52,9 @@ curl -s http://localhost:3000/api/v1/admin/manager/agents/persistent \
     "persona": "educado, objetivo, humano",
     "identity_name": "Eduardo Santos",
     "identity_emoji": "🛠️",
+    "identity_theme": "Suporte técnico objetivo e paciente",
     "channel": "whatsapp",
-    "workspace": "/data/.openclaw/workspace",
+    "workspace": "/data/.openclaw/agents/suporte-organix/workspace",
     "model": "openai-codex/gpt-5.3-codex",
     "system_prompt": "Você é um agente de suporte técnico da Organix...",
     "welcome_message": "Olá! 👋 Como posso te ajudar hoje?",
@@ -67,8 +69,8 @@ curl -s http://localhost:3000/api/v1/admin/manager/agents/persistent \
 
 Se `sync_openclaw=true`, já executa:
 
-- `openclaw agents add ...`
-- `openclaw agents set-identity ...`
+- `openclaw agents add ... --workspace /data/.openclaw/agents/<slug>/workspace`
+- `openclaw agents set-identity ... --theme "<identity_theme|persona>"`
 - `openclaw agents bind ...`
 
 ### 3) Sincronizar manualmente no OpenClaw

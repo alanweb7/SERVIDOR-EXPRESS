@@ -22,6 +22,7 @@ type PersistentAgentRow = {
   persona: string;
   identity_name: string;
   identity_emoji: string | null;
+  identity_theme: string | null;
   workspace: string;
   model: string;
   channel: string;
@@ -39,12 +40,14 @@ type PersistentAgentRow = {
 
 export class AdminManagerService {
   async createPersistentAgent(input: AdminAgentCreateInput) {
+    const agent = this.sanitize(input.agent, "agent");
+    const workspace = this.resolveWorkspace(agent, input.workspace);
     const args = [
       "agents",
       "add",
-      this.sanitize(input.agent, "agent"),
+      agent,
       "--workspace",
-      input.workspace,
+      workspace,
       "--model",
       input.model,
       ...(input.non_interactive ? ["--non-interactive"] : []),
@@ -62,7 +65,8 @@ export class AdminManagerService {
       this.sanitize(input.agent, "agent"),
       "--name",
       input.name,
-      ...(input.emoji ? ["--emoji", input.emoji] : [])
+      ...(input.emoji ? ["--emoji", input.emoji] : []),
+      ...(input.theme ? ["--theme", input.theme] : [])
     ];
 
     return this.runOpenClaw(args);
@@ -97,7 +101,8 @@ export class AdminManagerService {
     const identity = await this.setIdentity({
       agent: input.slug,
       name: input.name,
-      emoji: "🛠️"
+      emoji: "🛠️",
+      theme: input.persona
     });
 
     const bind = await this.bindChannel({
@@ -149,7 +154,8 @@ export class AdminManagerService {
         persona: input.persona,
         identity_name: input.identity_name,
         identity_emoji: input.identity_emoji ?? null,
-        workspace: input.workspace,
+        identity_theme: input.identity_theme ?? input.persona,
+        workspace: this.resolveWorkspace(slug, input.workspace),
         model: input.model,
         channel: input.channel,
         system_prompt: input.system_prompt ?? null,
@@ -218,7 +224,7 @@ export class AdminManagerService {
         throw new HttpError(404, "agent_not_found", `Agente persistente nao encontrado: ${slug}`);
       }
 
-      const workspace = input.workspace ?? current.workspace;
+      const workspace = this.resolveWorkspace(slug, input.workspace ?? current.workspace);
       const model = input.model ?? current.model;
       const channel = input.channel ?? current.channel;
 
@@ -234,7 +240,8 @@ export class AdminManagerService {
       const identity = await this.setIdentity({
         agent: slug,
         name: current.identity_name || current.name,
-        emoji: current.identity_emoji ?? undefined
+        emoji: current.identity_emoji ?? undefined,
+        theme: input.theme ?? current.identity_theme ?? current.persona
       });
 
       const bind = await this.runBindWithTolerance({
@@ -250,6 +257,7 @@ export class AdminManagerService {
         workspace,
         model,
         channel,
+        identity_theme: input.theme ?? current.identity_theme ?? current.persona,
         last_synced_at: nowIso,
         updated_at: nowIso
       });
@@ -423,5 +431,13 @@ export class AdminManagerService {
       "Falha ao acessar persistencia de agentes",
       { operation, reason: message.slice(0, 1500) }
     );
+  }
+
+  private resolveWorkspace(agent: string, requested?: string): string {
+    const incoming = (requested || "").trim();
+    if (!incoming || incoming === "/data/.openclaw/workspace") {
+      return `/data/.openclaw/agents/${agent}/workspace`;
+    }
+    return incoming;
   }
 }
