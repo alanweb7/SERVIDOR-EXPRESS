@@ -6,6 +6,7 @@ import { healthRoutes } from "./routes/health.routes.js";
 import { messageRoutes } from "./routes/message.routes.js";
 import { aiRoutes } from "./routes/ai.routes.js";
 import { openClawAgentRoutes } from "./routes/openclaw-agent.routes.js";
+import { adminManagerRoutes } from "./routes/admin-manager.routes.js";
 import { fail } from "./utils/response.js";
 import { ZodError } from "zod";
 import { HttpError } from "./utils/http-error.js";
@@ -109,6 +110,7 @@ export function createApp(partialDeps?: Partial<AppDeps>): FastifyInstance {
   app.register(messageRoutes);
   app.register(aiRoutes);
   app.register(openClawAgentRoutes);
+  app.register(adminManagerRoutes);
 
   app.setNotFoundHandler((request, reply) => {
     request.log.warn({ url: request.url }, "Rota nao encontrada");

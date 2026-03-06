@@ -9,6 +9,7 @@ const envSchema = z.object({
   RATE_LIMIT_WINDOW: z.string().default("1 minute"),
   WEBHOOK_SIGNING_SECRET: z.string().min(1).default("change-me"),
   AI_INTERNAL_TOKEN: z.string().min(1).default("change-me-ai-token"),
+  ADMIN_MANAGER_TOKEN: z.string().min(1).default("change-me-admin-token"),
   AI_CONTEXT_WINDOW: z.coerce.number().int().positive().default(12),
   AI_TRANSIENT_MAX_RETRIES: z.coerce.number().int().min(0).max(5).default(1),
   OPENCLAW_GATEWAY_URL: z.string().optional(),
