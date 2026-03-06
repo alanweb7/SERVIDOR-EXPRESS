@@ -234,7 +234,7 @@ export class AdminManagerService {
         emoji: current.identity_emoji ?? undefined
       });
 
-      const bind = await this.bindChannel({
+      const bind = await this.runBindWithTolerance({
         agent: slug,
         bind: channel
       });
@@ -347,6 +347,31 @@ export class AdminManagerService {
           return {
             skipped: true,
             reason: "agent_already_exists"
+          };
+        }
+      }
+      throw error;
+    }
+  }
+
+  private async runBindWithTolerance(input: { agent: string; bind: string }) {
+    try {
+      return await this.bindChannel({
+        agent: input.agent,
+        bind: input.bind
+      });
+    } catch (error) {
+      if (error instanceof HttpError) {
+        const reason = JSON.stringify(error.cause ?? "").toLowerCase();
+        if (
+          reason.includes("already") ||
+          reason.includes("exists") ||
+          reason.includes("duplicate") ||
+          reason.includes("bound")
+        ) {
+          return {
+            skipped: true,
+            reason: "binding_already_exists"
           };
         }
       }
