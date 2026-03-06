@@ -146,3 +146,102 @@ Em erro de validacao, os logs incluem:
 - `message_id`
 - `session_id`
 - `phase=validate_inbound_payload`
+## Uso do mesmo payload na rota de agente
+
+A rota abaixo tambem aceita o payload padronizado e converte internamente para envio ao OpenClaw:
+- `POST /v1/webhook/agent/send`
+
+Auth dessa rota:
+- Header obrigatorio: `Authorization: Bearer <AI_INTERNAL_TOKEN>`
+
+### Comportamento nessa rota
+- Aceita payload padronizado (`session_id`, `message_type`, `media`, etc).
+- Monta a mensagem para o agente com contexto de tipo de midia (tipo, url, mime, arquivo, duracao).
+- `sessionId` pode vir como `sessionId` ou `session_id`.
+- `agent` pode ser enviado no payload; se omitido, usa `OPENCLAW_WEBHOOK_AGENT`.
+- `sessionId` se omitido usa `OPENCLAW_WEBHOOK_SESSION_ID`.
+
+### Exemplo (imagem + legenda) em `/v1/webhook/agent/send`
+
+```bash
+curl -s -X POST http://localhost:3000/v1/webhook/agent/send \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer change-me-ai-token" \
+  -d '{
+    "session_id":"n8n-interpreter",
+    "user_id":"5511999999999",
+    "channel":"whatsapp",
+    "message_id":"msg-image-002",
+    "timestamp":"2026-03-05T18:05:00Z",
+    "message_type":"image",
+    "message":"Segue comprovante",
+    "media":{
+      "url":"https://cdn.exemplo.com/midia/comprovante.jpg",
+      "mime_type":"image/jpeg",
+      "caption":"Segue comprovante",
+      "filename":"comprovante.jpg",
+      "duration_sec":null
+    },
+    "metadata":{
+      "provider":"evolution",
+      "instance":"inst-1",
+      "raw_event":{}
+    },
+    "agent":"interpreter"
+  }'
+```
+
+Obs: para essa rota, o backend nao persiste em banco; ele apenas encaminha para o OpenClaw e retorna a resposta.
+
+## Modo async (background) em `/v1/webhook/agent/send`
+
+A mesma rota aceita processamento assincrono:
+
+```json
+{
+  "mode": "async",
+  "callback": {
+    "url": "https://seu-backend.com/webhooks/assistant-result",
+    "auth_header": "Bearer SEU_TOKEN_CALLBACK"
+  },
+  "session_id": "n8n-interpreter",
+  "message_type": "text",
+  "message": "Oi"
+}
+```
+
+Resposta imediata:
+
+```json
+{
+  "accepted": true,
+  "job_id": "job_01HVXYZ...",
+  "status": "queued",
+  "eta_sec": 8
+}
+```
+
+Callback de sucesso:
+
+```json
+{
+  "accepted": true,
+  "job_id": "job_01HVXYZ...",
+  "status": "completed",
+  "result": {}
+}
+```
+
+Callback de falha:
+
+```json
+{
+  "accepted": true,
+  "job_id": "job_01HVXYZ...",
+  "status": "failed",
+  "error": {
+    "code": "openclaw_command_failed",
+    "message": "..."
+  }
+}
+```

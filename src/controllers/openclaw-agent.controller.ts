@@ -1,4 +1,5 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
+import { randomUUID } from "node:crypto";
 import { env } from "../config/env.js";
 import {
   openClawAgentSendSchema,
@@ -42,6 +43,42 @@ export class OpenClawAgentController {
       },
       "OpenClaw webhook request received"
     );
+
+    if (payload.mode === "async") {
+      const jobId = `job_${randomUUID().replace(/-/g, "")}`;
+      const etaSec = 8;
+
+      void this.service
+        .send(forced)
+        .then(async (result) => {
+          if (!payload.callback?.url) return;
+          await this.sendCallback(payload.callback.url, payload.callback.auth_header, {
+            accepted: true,
+            job_id: jobId,
+            status: "completed",
+            result
+          });
+        })
+        .catch(async (error) => {
+          if (!payload.callback?.url) return;
+          await this.sendCallback(payload.callback.url, payload.callback.auth_header, {
+            accepted: true,
+            job_id: jobId,
+            status: "failed",
+            error: {
+              code: "openclaw_command_failed",
+              message: error instanceof Error ? error.message : "Falha ao executar comando OpenClaw"
+            }
+          });
+        });
+
+      return reply.code(202).send({
+        accepted: true,
+        job_id: jobId,
+        status: "queued",
+        eta_sec: etaSec
+      });
+    }
 
     const result = await this.service.send(forced);
     return reply.code(200).send(ok(result));
@@ -89,5 +126,21 @@ export class OpenClawAgentController {
       agent: payload.agent ?? env.OPENCLAW_WEBHOOK_AGENT,
       sessionId: payload.sessionId ?? payload.session_id ?? env.OPENCLAW_WEBHOOK_SESSION_ID
     };
+  }
+
+  private async sendCallback(url: string, authHeader: string | undefined, payload: unknown): Promise<void> {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json"
+    };
+
+    if (authHeader) {
+      headers.Authorization = authHeader;
+    }
+
+    await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload)
+    }).catch(() => undefined);
   }
 }

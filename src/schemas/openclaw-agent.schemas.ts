@@ -8,6 +8,13 @@ export const openClawAgentSendSchema = z.object({
 });
 
 export const openClawWebhookSendSchema = z.object({
+  mode: z.enum(["sync", "async"]).optional().default("sync"),
+  callback: z
+    .object({
+      url: z.string().url(),
+      auth_header: z.string().min(1).optional()
+    })
+    .optional(),
   message: z.string().optional(),
   sessionId: z.string().min(1).optional(),
   agent: z.string().min(1).optional(),
@@ -34,6 +41,14 @@ export const openClawWebhookSendSchema = z.object({
       raw_event: z.record(z.string(), z.unknown()).optional()
     })
     .optional()
+}).superRefine((value, ctx) => {
+  if (value.mode === "async" && !value.callback?.url) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["callback", "url"],
+      message: "callback.url e obrigatorio quando mode=async"
+    });
+  }
 });
 
 export type OpenClawAgentSendInput = z.infer<typeof openClawAgentSendSchema>;
