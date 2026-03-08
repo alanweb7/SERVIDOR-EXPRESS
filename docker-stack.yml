@@ -66,8 +66,8 @@ services:
         delay: 5s
         order: stop-first
     networks:
-      - treafik
+      - traefik
 
 networks:
-  treafik:
+  traefik:
     external: true
