@@ -66,8 +66,8 @@ services:
         delay: 5s
         order: stop-first
     networks:
-      - backend
+      - treafik
 
 networks:
-  backend:
-    driver: overlay
+  treafik:
+    external: true
