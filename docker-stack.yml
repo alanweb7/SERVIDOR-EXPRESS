@@ -1,0 +1,72 @@
+services:
+  api:
+    image: ghcr.io/alanweb7/servidor-express-opclaw:latest
+    ports:
+      - target: 3000
+        published: 3000
+        protocol: tcp
+        mode: ingress
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: ${PORT:-3000}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      CORS_ORIGIN: ${CORS_ORIGIN:-*}
+      RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-60}
+      RATE_LIMIT_WINDOW: ${RATE_LIMIT_WINDOW:-1 minute}
+      WEBHOOK_SIGNING_SECRET: ${WEBHOOK_SIGNING_SECRET}
+      AI_INTERNAL_TOKEN: ${AI_INTERNAL_TOKEN}
+      ADMIN_MANAGER_TOKEN: ${ADMIN_MANAGER_TOKEN}
+      AI_CONTEXT_WINDOW: ${AI_CONTEXT_WINDOW:-12}
+      AI_TRANSIENT_MAX_RETRIES: ${AI_TRANSIENT_MAX_RETRIES:-1}
+      OPENCLAW_GATEWAY_URL: ${OPENCLAW_GATEWAY_URL:-}
+      OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN:-}
+      OPENCLAW_AGENT_ID: ${OPENCLAW_AGENT_ID:-}
+      OPENCLAW_SESSION_DEFAULT: ${OPENCLAW_SESSION_DEFAULT:-}
+      OPENCLAW_DEVICE_ID: ${OPENCLAW_DEVICE_ID:-lab-api-main}
+      OPENCLAW_DEVICE_IDENTITY_PATH: ${OPENCLAW_DEVICE_IDENTITY_PATH:-/app/.openclaw/device-identity.json}
+      OPENCLAW_ENABLE_FALLBACK_CLI: ${OPENCLAW_ENABLE_FALLBACK_CLI:-false}
+      OPENCLAW_FALLBACK_CONTAINER: ${OPENCLAW_FALLBACK_CONTAINER:-openclaw-cvsy-openclaw-1}
+      OPENCLAW_CONNECT_TIMEOUT_MS: ${OPENCLAW_CONNECT_TIMEOUT_MS:-15000}
+      OPENCLAW_DEBUG: ${OPENCLAW_DEBUG:-false}
+      OPENCLAW_AGENT_CONTAINER_NAME: ${OPENCLAW_AGENT_CONTAINER_NAME:-openclaw-jsyu-openclaw-1}
+      OPENCLAW_AGENT_DOCKER_USER: ${OPENCLAW_AGENT_DOCKER_USER:-node}
+      OPENCLAW_AGENT_SESSION_DEFAULT: ${OPENCLAW_AGENT_SESSION_DEFAULT:-n8n-main}
+      OPENCLAW_AGENT_DEFAULT: ${OPENCLAW_AGENT_DEFAULT:-}
+      OPENCLAW_WEBHOOK_AGENT: ${OPENCLAW_WEBHOOK_AGENT:-interpreter}
+      OPENCLAW_WEBHOOK_SESSION_ID: ${OPENCLAW_WEBHOOK_SESSION_ID:-n8n-interpreter}
+      OPENCLAW_AGENT_COMMAND_TIMEOUT_MS: ${OPENCLAW_AGENT_COMMAND_TIMEOUT_MS:-120000}
+      OPENCLAW_AGENT_TRANSPORT: ${OPENCLAW_AGENT_TRANSPORT:-ws}
+      OPENCLAW_AGENT_DOCKER_FALLBACK: ${OPENCLAW_AGENT_DOCKER_FALLBACK:-false}
+      DATA_PROVIDER: ${DATA_PROVIDER:-supabase}
+      SUPABASE_URL: ${SUPABASE_URL:-}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 60s
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+        failure_action: rollback
+      rollback_config:
+        parallelism: 1
+        delay: 5s
+        order: stop-first
+    networks:
+      - backend
+
+networks:
+  backend:
+    driver: overlay

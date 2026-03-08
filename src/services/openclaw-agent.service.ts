@@ -1,6 +1,8 @@
-﻿import { execFile } from "node:child_process";
+import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { promisify } from "node:util";
 import { env } from "../config/env.js";
+import { OpenClawClient, OpenClawWsError } from "../integrations/openclaw/client.js";
 import type { OpenClawAgentSendInput } from "../schemas/openclaw-agent.schemas.js";
 import { HttpError } from "../utils/http-error.js";
 
@@ -12,6 +14,7 @@ type OpenClawAgentSendResult = {
     sessionId: string;
     agent: string;
     container: string;
+    transport: "ws" | "docker";
     message: string;
   };
   openclaw: Record<string, unknown>;
@@ -23,9 +26,99 @@ export class OpenClawAgentService {
     const sessionId = this.sanitizeToken(input.sessionId ?? env.OPENCLAW_AGENT_SESSION_DEFAULT, "sessionId");
     const rawAgent = input.agent ?? env.OPENCLAW_AGENT_DEFAULT;
     const agent = rawAgent ? this.sanitizeToken(rawAgent, "agent") : null;
-    const container = this.sanitizeToken(input.container ?? env.OPENCLAW_AGENT_CONTAINER_NAME, "container");
-    const dockerUser = this.sanitizeToken(env.OPENCLAW_AGENT_DOCKER_USER, "dockerUser");
     const message = input.message;
+    const container = input.container ?? env.OPENCLAW_AGENT_CONTAINER_NAME;
+    const dockerUser = env.OPENCLAW_AGENT_DOCKER_USER;
+    const transport = env.OPENCLAW_AGENT_TRANSPORT;
+
+    if (transport === "ws" || transport === "auto") {
+      try {
+        return await this.sendViaWs(sessionId, message, agent, container);
+      } catch (error) {
+        const canFallbackDocker = transport === "auto" || env.OPENCLAW_AGENT_DOCKER_FALLBACK;
+        if (!canFallbackDocker) {
+          throw this.toHttpError(error);
+        }
+      }
+    }
+
+    if (transport === "docker" || transport === "auto" || env.OPENCLAW_AGENT_DOCKER_FALLBACK) {
+      return this.sendViaDockerExec({
+        sessionId,
+        message,
+        agent,
+        container: this.sanitizeToken(container, "container"),
+        dockerUser: this.sanitizeToken(dockerUser, "dockerUser")
+      });
+    }
+
+    throw new HttpError(503, "openclaw_transport_unavailable", "Transporte OpenClaw indisponivel");
+  }
+
+  private async sendViaWs(
+    sessionId: string,
+    message: string,
+    agent: string | null,
+    container: string
+  ): Promise<OpenClawAgentSendResult> {
+    if (!env.OPENCLAW_GATEWAY_URL || !env.OPENCLAW_GATEWAY_TOKEN) {
+      throw new HttpError(
+        503,
+        "openclaw_gateway_not_configured",
+        "OPENCLAW_GATEWAY_URL e OPENCLAW_GATEWAY_TOKEN sao obrigatorios para transporte ws"
+      );
+    }
+
+    const gatewayAgent = agent ?? env.OPENCLAW_AGENT_ID ?? "main";
+    const client = new OpenClawClient({
+      url: env.OPENCLAW_GATEWAY_URL,
+      token: env.OPENCLAW_GATEWAY_TOKEN,
+      agentId: gatewayAgent,
+      deviceId: env.OPENCLAW_DEVICE_ID,
+      deviceIdentityPath: env.OPENCLAW_DEVICE_IDENTITY_PATH,
+      timeoutMs: env.OPENCLAW_CONNECT_TIMEOUT_MS,
+      debug: env.OPENCLAW_DEBUG
+    });
+
+    try {
+      const reply = await client.sendChat({
+        sessionKey: sessionId,
+        message,
+        idempotencyKey: randomUUID(),
+        agentId: agent ?? undefined
+      });
+
+      const openclawPayload: Record<string, unknown> = {
+        reply_text: reply.replyText,
+        agent_name: agent ?? gatewayAgent,
+        provider_message_id: reply.providerMessageId ?? null,
+        correlation_id: reply.correlationId ?? null
+      };
+
+      return {
+        request: {
+          sessionId,
+          agent: agent ?? gatewayAgent,
+          container,
+          transport: "ws",
+          message
+        },
+        openclaw: openclawPayload,
+        raw: JSON.stringify(openclawPayload)
+      };
+    } finally {
+      client.close();
+    }
+  }
+
+  private async sendViaDockerExec(input: {
+    sessionId: string;
+    message: string;
+    agent: string | null;
+    container: string;
+    dockerUser: string;
+  }): Promise<OpenClawAgentSendResult> {
+    const { sessionId, message, agent, container, dockerUser } = input;
 
     const args = [
       "exec",
@@ -53,6 +146,7 @@ export class OpenClawAgentService {
           sessionId,
           agent: agent ?? "",
           container,
+          transport: "docker",
           message
         },
         openclaw: this.parseJson(stdout),
@@ -93,6 +187,7 @@ export class OpenClawAgentService {
                 sessionId,
                 agent: "",
                 container,
+                transport: "docker",
                 message
               },
               openclaw: this.parseJson(stdout),
@@ -167,5 +262,26 @@ export class OpenClawAgentService {
       stdout: typeof err.stdout === "string" ? err.stdout.slice(0, 1500) : "",
       timedOut: err.killed === true || err.signal === "SIGTERM"
     };
+  }
+
+  private toHttpError(error: unknown): HttpError {
+    if (error instanceof HttpError) return error;
+    if (error instanceof OpenClawWsError) {
+      if (error.code === "openclaw_unavailable") {
+        return new HttpError(503, "openclaw_unavailable", error.message, {
+          code: error.code,
+          retryable: error.retryable
+        });
+      }
+      return new HttpError(502, "openclaw_gateway_error", error.message, {
+        code: error.code,
+        retryable: error.retryable
+      });
+    }
+
+    const reason = error instanceof Error ? error.message : String(error);
+    return new HttpError(502, "openclaw_gateway_error", "Falha ao chamar OpenClaw via gateway", {
+      reason
+    });
   }
 }

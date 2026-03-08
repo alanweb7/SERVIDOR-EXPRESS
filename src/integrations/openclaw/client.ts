@@ -36,6 +36,7 @@ export type SendChatInput = {
   sessionKey: string;
   message: string;
   idempotencyKey: string;
+  agentId?: string;
 };
 
 export type SendChatOutput = {
@@ -79,7 +80,8 @@ export class OpenClawClient {
     const requestId = this.sendRequest("chat.send", {
       sessionKey: input.sessionKey,
       message: input.message,
-      idempotencyKey: input.idempotencyKey
+      idempotencyKey: input.idempotencyKey,
+      ...(input.agentId ? { agentId: input.agentId, agent: input.agentId } : {})
     });
 
     const response = await this.waitForFrame(
