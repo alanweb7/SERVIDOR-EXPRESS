@@ -18,7 +18,7 @@ Ele ja esta preparado com:
 - estrategia de update/rollback
 - mount do Docker socket (`/var/run/docker.sock`) para fallback Docker CLI
 - volume persistente de identidade WS (`/app/.openclaw`)
-- transporte OpenClaw em `ws` fixo no exemplo (`OPENCLAW_AGENT_TRANSPORT=ws`)
+- transporte OpenClaw em `docker` com descoberta automatica do container
 - fallback Docker desativado no exemplo (`OPENCLAW_AGENT_DOCKER_FALLBACK=false`)
 
 ## Passo a passo (Portainer)
@@ -34,31 +34,25 @@ Ele ja esta preparado com:
    - `SUPABASE_SERVICE_ROLE_KEY`
 5. Clique em `Deploy the stack`
 
-## OpenClaw sem docker exec (recomendado)
+## OpenClaw via docker exec com descoberta automatica (recomendado para seu cenario)
 
-Para evitar dependencia de nome de container no Swarm, use service discovery + WS:
+Use:
 
-- `OPENCLAW_AGENT_TRANSPORT=ws`
-- `OPENCLAW_AGENT_DOCKER_FALLBACK=false`
-- `OPENCLAW_GATEWAY_URL=ws://<servico-openclaw>:<porta>`
-- `OPENCLAW_GATEWAY_TOKEN=<token>`
+- `OPENCLAW_AGENT_TRANSPORT=docker`
+- `OPENCLAW_AGENT_CONTAINER_DISCOVERY=true`
+- `OPENCLAW_AGENT_CONTAINER_FILTER=openclaw_ai`
+- `OPENCLAW_AGENT_DOCKER_USER=node`
 
-Exemplo em Swarm:
+Como funciona:
 
-- `OPENCLAW_GATEWAY_URL=ws://openclaw_ai:18789`
+- A API roda `docker ps --filter name=openclaw_ai --format {{.ID}}`
+- Usa o primeiro container encontrado para executar `openclaw agent ...`
+- Voce nao precisa enviar `container` no payload na maioria dos casos
 
-Exemplo em docker compose:
+Se quiser fixar um container manualmente:
 
-- `OPENCLAW_GATEWAY_URL=ws://openclaw:18789`
-
-Notas:
-
-- O hostname deve ser o nome do servico Docker na mesma rede.
-- Em modo `ws`, a API nao usa `docker exec` para `/v1/webhook/agent/send`.
-- Para migracao gradual:
-  - `OPENCLAW_AGENT_TRANSPORT=auto`
-  - `OPENCLAW_AGENT_DOCKER_FALLBACK=true`
-  - Nesse modo tenta WS primeiro e cai para Docker CLI se WS falhar.
+- `OPENCLAW_AGENT_CONTAINER_DISCOVERY=false`
+- `OPENCLAW_AGENT_CONTAINER_NAME=<nome-ou-id-do-container>`
 
 ## Atualizar versao
 
@@ -71,17 +65,15 @@ Notas:
 - Se a imagem GHCR for privada, configure credencial de registry no Portainer.
 - Para usar tag imutavel, troque em `image:` de `latest` para `sha-<commit>`.
 - O `docker-compose.yml` atual permanece inalterado e funcional.
-- Mantenha `OPENCLAW_DEVICE_ID` estavel e `replicas: 1` para evitar `device identity mismatch`.
+- Em modo `docker`, `OPENCLAW_DEVICE_ID` nao e obrigatorio para o fluxo principal.
 
-## Se ocorrer "device identity mismatch"
+## Se ocorrer "openclaw_container_not_found"
 
-1. Garanta `OPENCLAW_DEVICE_ID` fixo (ex.: `api-organix-prod-1`).
-2. Mantenha o volume `api_openclaw_identity:/app/.openclaw`.
-3. Se ja houver mismatch, redefina identidade:
-   - pare a stack
-   - remova o arquivo antigo `device-identity.json` dentro do volume
-   - suba a stack novamente
-   - refaca o pareamento do device no gateway OpenClaw, se necessario
+1. Verifique se existe container OpenClaw com o filtro:
+   - `docker ps --filter "name=openclaw_ai"`
+2. Se o nome do service for outro, ajuste:
+   - `OPENCLAW_AGENT_CONTAINER_FILTER=<seu-filtro-real>`
+3. Redeploy da stack.
 
 
 ## Bloco de exemplo
@@ -101,14 +93,10 @@ DATA_PROVIDER=supabase
 SUPABASE_URL=https://SEU-PROJETO.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=SEU_SERVICE_ROLE_KEY
 
-OPENCLAW_AGENT_TRANSPORT=ws
-OPENCLAW_GATEWAY_URL=ws://openclaw_ai:18789
-OPENCLAW_GATEWAY_TOKEN=SEU_TOKEN_GATEWAY
-
-OPENCLAW_DEVICE_ID=lab-api-main
-OPENCLAW_DEVICE_IDENTITY_PATH=/app/.openclaw/device-identity.json
-OPENCLAW_CONNECT_TIMEOUT_MS=15000
-OPENCLAW_DEBUG=false
+OPENCLAW_AGENT_TRANSPORT=docker
+OPENCLAW_AGENT_CONTAINER_DISCOVERY=true
+OPENCLAW_AGENT_CONTAINER_FILTER=openclaw_ai
+OPENCLAW_AGENT_DOCKER_USER=node
 
 OPENCLAW_WEBHOOK_AGENT=interpreter
 OPENCLAW_WEBHOOK_SESSION_ID=n8n-interpreter
@@ -118,7 +106,6 @@ OPENCLAW_AGENT_DEFAULT=
 OPENCLAW_AGENT_COMMAND_TIMEOUT_MS=120000
 OPENCLAW_AGENT_DOCKER_FALLBACK=false
 OPENCLAW_AGENT_CONTAINER_NAME=openclaw-jsyu-openclaw-1
-OPENCLAW_AGENT_DOCKER_USER=node
 
 AI_CONTEXT_WINDOW=12
 AI_TRANSIENT_MAX_RETRIES=1

@@ -275,11 +275,12 @@ export class AdminManagerService {
   }
 
   private async runOpenClaw(openclawArgs: string[]) {
+    const container = await this.resolveContainer();
     const dockerArgs = [
       "exec",
       "-u",
       this.sanitize(env.OPENCLAW_AGENT_DOCKER_USER, "OPENCLAW_AGENT_DOCKER_USER"),
-      this.sanitize(env.OPENCLAW_AGENT_CONTAINER_NAME, "OPENCLAW_AGENT_CONTAINER_NAME"),
+      container,
       "openclaw",
       ...openclawArgs
     ];
@@ -302,6 +303,45 @@ export class AdminManagerService {
         reason: err.message ?? "erro desconhecido",
         stderr: err.stderr?.slice(0, 1500) ?? "",
         stdout: err.stdout?.slice(0, 1500) ?? ""
+      });
+    }
+  }
+
+  private async resolveContainer(): Promise<string> {
+    if (!env.OPENCLAW_AGENT_CONTAINER_DISCOVERY) {
+      return this.sanitize(env.OPENCLAW_AGENT_CONTAINER_NAME, "OPENCLAW_AGENT_CONTAINER_NAME");
+    }
+
+    const filter = this.sanitize(env.OPENCLAW_AGENT_CONTAINER_FILTER, "OPENCLAW_AGENT_CONTAINER_FILTER");
+    try {
+      const { stdout } = await execFileAsync(
+        "docker",
+        ["ps", "--filter", `name=${filter}`, "--format", "{{.ID}}"],
+        {
+          timeout: 5000,
+          maxBuffer: 1024 * 1024
+        }
+      );
+
+      const id = stdout
+        .split("\n")
+        .map((line) => line.trim())
+        .find(Boolean);
+
+      if (!id) {
+        throw new HttpError(
+          503,
+          "openclaw_container_not_found",
+          `Nenhum container encontrado com filtro name=${filter}`
+        );
+      }
+
+      return this.sanitize(id, "containerId");
+    } catch (error) {
+      if (error instanceof HttpError) throw error;
+      const reason = error instanceof Error ? error.message : String(error);
+      throw new HttpError(503, "openclaw_container_discovery_failed", "Falha ao descobrir container OpenClaw", {
+        reason
       });
     }
   }

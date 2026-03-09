@@ -27,7 +27,7 @@ export class OpenClawAgentService {
     const rawAgent = input.agent ?? env.OPENCLAW_AGENT_DEFAULT;
     const agent = rawAgent ? this.sanitizeToken(rawAgent, "agent") : null;
     const message = input.message;
-    const container = input.container ?? env.OPENCLAW_AGENT_CONTAINER_NAME;
+    const container = await this.resolveContainer(input.container);
     const dockerUser = env.OPENCLAW_AGENT_DOCKER_USER;
     const transport = env.OPENCLAW_AGENT_TRANSPORT;
 
@@ -47,7 +47,7 @@ export class OpenClawAgentService {
         sessionId,
         message,
         agent,
-        container: this.sanitizeToken(container, "container"),
+        container,
         dockerUser: this.sanitizeToken(dockerUser, "dockerUser")
       });
     }
@@ -221,6 +221,47 @@ export class OpenClawAgentService {
       timeout: env.OPENCLAW_AGENT_COMMAND_TIMEOUT_MS,
       maxBuffer: 1024 * 1024
     });
+  }
+
+  private async resolveContainer(containerOverride?: string): Promise<string> {
+    if (containerOverride?.trim()) {
+      return this.sanitizeToken(containerOverride, "container");
+    }
+
+    if (!env.OPENCLAW_AGENT_CONTAINER_DISCOVERY) {
+      return this.sanitizeToken(env.OPENCLAW_AGENT_CONTAINER_NAME, "OPENCLAW_AGENT_CONTAINER_NAME");
+    }
+
+    const filter = this.sanitizeToken(env.OPENCLAW_AGENT_CONTAINER_FILTER, "OPENCLAW_AGENT_CONTAINER_FILTER");
+    try {
+      const { stdout } = await execFileAsync(
+        "docker",
+        ["ps", "--filter", `name=${filter}`, "--format", "{{.ID}}"],
+        {
+          timeout: 5000,
+          maxBuffer: 1024 * 1024
+        }
+      );
+      const id = stdout
+        .split("\n")
+        .map((line) => line.trim())
+        .find(Boolean);
+
+      if (!id) {
+        throw new HttpError(
+          503,
+          "openclaw_container_not_found",
+          `Nenhum container encontrado com filtro name=${filter}`
+        );
+      }
+      return this.sanitizeToken(id, "containerId");
+    } catch (error) {
+      if (error instanceof HttpError) throw error;
+      const reason = error instanceof Error ? error.message : String(error);
+      throw new HttpError(503, "openclaw_container_discovery_failed", "Falha ao descobrir container OpenClaw", {
+        reason
+      });
+    }
   }
 
   private sanitizeToken(value: string, field: string): string {

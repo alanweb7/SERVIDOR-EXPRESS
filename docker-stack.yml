@@ -35,9 +35,11 @@ services:
       OPENCLAW_WEBHOOK_AGENT: ${OPENCLAW_WEBHOOK_AGENT:-interpreter}
       OPENCLAW_WEBHOOK_SESSION_ID: ${OPENCLAW_WEBHOOK_SESSION_ID:-n8n-interpreter}
       OPENCLAW_AGENT_COMMAND_TIMEOUT_MS: ${OPENCLAW_AGENT_COMMAND_TIMEOUT_MS:-120000}
-      # Force WS transport in Swarm/Portainer example (no docker exec dependency).
-      OPENCLAW_AGENT_TRANSPORT: ws
+      # Docker exec mode with automatic OpenClaw container discovery by name filter.
+      OPENCLAW_AGENT_TRANSPORT: docker
       OPENCLAW_AGENT_DOCKER_FALLBACK: "false"
+      OPENCLAW_AGENT_CONTAINER_DISCOVERY: "true"
+      OPENCLAW_AGENT_CONTAINER_FILTER: openclaw_ai
       DATA_PROVIDER: ${DATA_PROVIDER:-supabase}
       SUPABASE_URL: ${SUPABASE_URL:-}
       SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
