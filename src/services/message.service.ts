@@ -117,10 +117,8 @@ export class MessageService {
       body: JSON.stringify({
         model,
         user,
-        input: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: String(input.message) }
-        ],
+        instructions: systemPrompt,
+        input: String(input.message),
         metadata: {
           sessionKey,
           agentId: input.agentId,
