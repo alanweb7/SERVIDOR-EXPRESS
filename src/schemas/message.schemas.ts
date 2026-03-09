@@ -7,6 +7,15 @@ export const inboundWebhookSchema = z.object({
   payload: z.record(z.string(), z.unknown()).optional()
 }).passthrough();
 
+export const inboundBridgeSchema = z.object({
+  requestId: z.string().min(1),
+  customerId: z.string().min(1).optional(),
+  agentId: z.string().min(1),
+  sessionKey: z.string().min(1),
+  message: z.string().min(1),
+  callbackUrl: z.string().url().optional()
+});
+
 export const sendMessageSchema = z.object({
   to: z.string().min(3),
   content: z.string().min(1),
@@ -16,4 +25,5 @@ export const sendMessageSchema = z.object({
 });
 
 export type InboundWebhookInput = z.infer<typeof inboundWebhookSchema>;
+export type InboundBridgeInput = z.infer<typeof inboundBridgeSchema>;
 export type SendMessageInput = z.infer<typeof sendMessageSchema>;
