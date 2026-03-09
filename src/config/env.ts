@@ -20,6 +20,8 @@ const envSchema = z.object({
   OPENCLAW_HOOK_URL: z.string().url().default("https://opc.organix.ia.br/hooks/agent"),
   OPENCLAW_TOKEN: z.string().optional(),
   CALLBACK_URL: z.string().url().optional(),
+  CALLBACK_SIGNING_SECRET: z.string().optional(),
+  CALLBACK_TIMEOUT_MS: z.coerce.number().int().positive().default(10000),
   OPENCLAW_AGENT_ID: z.string().min(1).optional(),
   OPENCLAW_SESSION_DEFAULT: z.string().optional(),
   OPENCLAW_DEVICE_ID: z.string().min(1).default("lab-api-main"),

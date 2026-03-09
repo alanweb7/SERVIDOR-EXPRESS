@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { FastifyBaseLogger } from "fastify";
 import type { QueuePublisher } from "../adapters/queue/queue-publisher.js";
@@ -34,7 +34,19 @@ type BridgeAsyncResult = {
 
 type BridgeResult = BridgeSyncResult | BridgeAsyncResult;
 
+type AsyncBridgeJob = {
+  requestId: string;
+  customerId: string;
+  agentId: string;
+  sessionKey: string;
+  callbackUrl: string;
+  systemPrompt: string;
+  message: string;
+};
+
 export class MessageService {
+  private readonly asyncJobs = new Map<string, AsyncBridgeJob>();
+
   constructor(
     private readonly dedupRepository: MessageDedupRepository,
     private readonly queuePublisher: QueuePublisher
@@ -89,10 +101,9 @@ export class MessageService {
 
   async processInboundBridge(input: InboundBridgeInput): Promise<BridgeResult> {
     const mode = input.mode ?? "sync";
-    const gatewayToken = (env.OPENCLAW_GATEWAY_TOKEN || "").trim();
-    const hookToken = (env.OPENCLAW_TOKEN || "").trim();
     const callbackUrl = (input.callbackUrl || env.CALLBACK_URL || "").trim();
     const sessionKey = this.normalizeSessionKey(input.sessionKey, input.customerId, input.agentId);
+    const systemPrompt = input.systemPrompt || SYSTEM_BY_AGENT[input.agentId] || DEFAULT_SYSTEM_PROMPT;
     const dedupId = `bridge:${input.requestId}`;
 
     const duplicate = await this.dedupRepository.has(dedupId);
@@ -104,43 +115,114 @@ export class MessageService {
     }
 
     if (mode === "async") {
-      if (!hookToken) {
-        throw new HttpError(503, "bridge_not_configured", "OPENCLAW_TOKEN nao configurado para mode=async");
+      if (!callbackUrl) {
+        throw new HttpError(422, "VALIDATION_ERROR", "callbackUrl e obrigatorio quando mode=async");
       }
 
-      const hook = await fetch(env.OPENCLAW_HOOK_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${hookToken}`
-        },
-        body: JSON.stringify({
-          agentId: input.agentId,
-          sessionKey,
-          message: String(input.message),
-          wakeMode: "now",
-          deliver: false,
-          name: `bridge:${input.customerId}`
-        })
-      });
-
-      if (!hook.ok) {
-        const detail = await hook.text();
-        throw new HttpError(502, "hook_error", "Falha ao chamar /hooks/agent", {
-          status: hook.status,
-          detail: detail.slice(0, 1500)
-        });
-      }
+      const job: AsyncBridgeJob = {
+        requestId: input.requestId,
+        customerId: input.customerId,
+        agentId: input.agentId,
+        sessionKey,
+        callbackUrl,
+        systemPrompt,
+        message: String(input.message)
+      };
 
       await this.dedupRepository.save(dedupId);
+      this.asyncJobs.set(dedupId, job);
+      void this.executeAsyncBridgeJob(dedupId);
+
       return { ok: true, mode: "async", requestId: input.requestId, sessionKey, status: "accepted" };
     }
 
+    const reply = await this.requestOpenClawResponse({
+      requestId: input.requestId,
+      customerId: input.customerId,
+      agentId: input.agentId,
+      sessionKey,
+      systemPrompt,
+      message: String(input.message)
+    });
+
+    if (callbackUrl) {
+      await this.sendCallbackWithRetry(
+        callbackUrl,
+        {
+          requestId: input.requestId,
+          customerId: input.customerId,
+          agentId: input.agentId,
+          sessionKey,
+          status: "ok",
+          reply,
+          timestamp: new Date().toISOString()
+        },
+        input.requestId
+      );
+    }
+
+    await this.dedupRepository.save(dedupId);
+    return { ok: true, mode: "sync", requestId: input.requestId, sessionKey, reply };
+  }
+
+  async sendMessage(input: SendMessageInput): Promise<{ queued: boolean; messageId: string }> {
+    const messageId = input.messageId ?? randomUUID();
+    await this.queuePublisher.publish("messages.send", {
+      ...input,
+      messageId
+    });
+
+    return { queued: true, messageId };
+  }
+
+  private async executeAsyncBridgeJob(dedupId: string): Promise<void> {
+    const job = this.asyncJobs.get(dedupId);
+    if (!job) return;
+
+    try {
+      const reply = await this.requestOpenClawResponse(job);
+      await this.sendCallbackWithRetry(
+        job.callbackUrl,
+        {
+          requestId: job.requestId,
+          customerId: job.customerId,
+          agentId: job.agentId,
+          sessionKey: job.sessionKey,
+          status: "ok",
+          reply,
+          timestamp: new Date().toISOString()
+        },
+        job.requestId
+      );
+      await this.queuePublisher.publish("bridge.callback.sent", {
+        requestId: job.requestId,
+        sessionKey: job.sessionKey
+      });
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      await this.queuePublisher.publish("bridge.callback.failed", {
+        requestId: job.requestId,
+        callbackUrl: job.callbackUrl,
+        reason
+      });
+    } finally {
+      this.asyncJobs.delete(dedupId);
+    }
+  }
+
+  private async requestOpenClawResponse(input: {
+    requestId: string;
+    customerId: string;
+    agentId: string;
+    sessionKey: string;
+    systemPrompt: string;
+    message: string;
+  }): Promise<string> {
+    const gatewayToken = (env.OPENCLAW_GATEWAY_TOKEN || "").trim();
     if (!gatewayToken) {
       throw new HttpError(503, "bridge_not_configured", "OPENCLAW_GATEWAY_TOKEN nao configurado");
     }
 
-    const systemPrompt = input.systemPrompt || SYSTEM_BY_AGENT[input.agentId] || DEFAULT_SYSTEM_PROMPT;
     const model = `openclaw:${input.agentId}`;
     const user = `cust:${input.customerId}:agent:${input.agentId}`;
 
@@ -153,10 +235,10 @@ export class MessageService {
       body: JSON.stringify({
         model,
         user,
-        instructions: systemPrompt,
-        input: String(input.message),
+        instructions: input.systemPrompt,
+        input: input.message,
         metadata: {
-          sessionKey,
+          sessionKey: input.sessionKey,
           agentId: input.agentId,
           requestId: input.requestId,
           customerId: input.customerId
@@ -178,41 +260,7 @@ export class MessageService {
     }
 
     const data = (await oc.json()) as Record<string, unknown>;
-    const reply = this.extractResponseText(data) || "Sem resposta.";
-    if (callbackUrl) {
-      const callbackPayload = {
-        ok: true,
-        mode: "sync",
-        requestId: input.requestId,
-        customerId: input.customerId,
-        agentId: input.agentId,
-        sessionKey,
-        reply,
-        status: "ok",
-        timestamp: new Date().toISOString()
-      };
-      await this.sendCallbackWithRetry(callbackUrl, callbackPayload, input.requestId);
-    }
-
-    await this.dedupRepository.save(dedupId);
-
-    return {
-      ok: true,
-      mode: "sync",
-      requestId: input.requestId,
-      sessionKey,
-      reply
-    };
-  }
-
-  async sendMessage(input: SendMessageInput): Promise<{ queued: boolean; messageId: string }> {
-    const messageId = input.messageId ?? randomUUID();
-    await this.queuePublisher.publish("messages.send", {
-      ...input,
-      messageId
-    });
-
-    return { queued: true, messageId };
+    return this.extractResponseText(data) || "Sem resposta.";
   }
 
   private normalizeSessionKey(sessionKey: string | undefined, customerId: string, agentId: string): string {
@@ -258,19 +306,28 @@ export class MessageService {
     const maxAttempts = 3;
     let lastStatus = 0;
     let lastDetail = "";
+    const body = JSON.stringify(payload);
 
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        "Idempotency-Key": requestId
+      };
+      if (env.CALLBACK_SIGNING_SECRET) {
+        headers["x-callback-signature"] = createHmac("sha256", env.CALLBACK_SIGNING_SECRET).update(body).digest("hex");
+      }
+
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), env.CALLBACK_TIMEOUT_MS);
       const response = await fetch(url, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Idempotency-Key": requestId
-        },
-        body: JSON.stringify(payload)
+        headers,
+        body,
+        signal: controller.signal
       }).catch((error: unknown) => {
         lastDetail = error instanceof Error ? error.message : String(error);
         return null;
-      });
+      }).finally(() => clearTimeout(timeout));
 
       if (response && response.ok) {
         return response.status;
