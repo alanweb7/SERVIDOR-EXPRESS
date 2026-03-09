@@ -124,8 +124,33 @@ export class OpenClawAgentController {
       message,
       container: payload.container,
       agent: payload.agent ?? env.OPENCLAW_WEBHOOK_AGENT,
-      sessionId: payload.sessionId ?? payload.session_id ?? env.OPENCLAW_WEBHOOK_SESSION_ID
+      sessionId: this.resolveWebhookSessionId(payload)
     };
+  }
+
+  private resolveWebhookSessionId(payload: OpenClawWebhookSendInput): string {
+    const explicitSessionId = payload.sessionId?.trim() || payload.session_id?.trim();
+    if (explicitSessionId) {
+      return explicitSessionId;
+    }
+
+    const rawUserId = payload.user_id?.trim() ?? "";
+    if (!rawUserId) {
+      return env.OPENCLAW_WEBHOOK_SESSION_ID;
+    }
+
+    const normalizedUser = rawUserId
+      .replace(/@.*$/, "")
+      .replace(/[^A-Za-z0-9._:/-]/g, "");
+    const normalizedChannel = (payload.channel?.trim() ?? "webhook")
+      .toLowerCase()
+      .replace(/[^A-Za-z0-9._:/-]/g, "");
+
+    if (!normalizedUser) {
+      return env.OPENCLAW_WEBHOOK_SESSION_ID;
+    }
+
+    return `${normalizedChannel || "webhook"}:${normalizedUser}`;
   }
 
   private async sendCallback(url: string, authHeader: string | undefined, payload: unknown): Promise<void> {
