@@ -16,14 +16,23 @@ const SYSTEM_BY_AGENT: Record<string, string> = {
     "Voce e Edu Ben, especialista em Suporte Tecnico. Responda de forma calma, tecnica e didatica, focando em diagnostico e solucao."
 };
 
-type BridgeResult = {
+type BridgeSyncResult = {
   ok: boolean;
+  mode: "sync";
   requestId: string;
   sessionKey: string;
   reply: string;
-  duplicate: boolean;
-  callbackStatus: number;
 };
+
+type BridgeAsyncResult = {
+  ok: boolean;
+  mode: "async";
+  requestId: string;
+  sessionKey: string;
+  status: "accepted";
+};
+
+type BridgeResult = BridgeSyncResult | BridgeAsyncResult;
 
 export class MessageService {
   constructor(
@@ -79,29 +88,56 @@ export class MessageService {
   }
 
   async processInboundBridge(input: InboundBridgeInput): Promise<BridgeResult> {
+    const mode = input.mode ?? "sync";
     const gatewayToken = (env.OPENCLAW_GATEWAY_TOKEN || "").trim();
+    const hookToken = (env.OPENCLAW_TOKEN || "").trim();
     const callbackUrl = (input.callbackUrl || env.CALLBACK_URL || "").trim();
     const sessionKey = this.normalizeSessionKey(input.sessionKey, input.customerId, input.agentId);
     const dedupId = `bridge:${input.requestId}`;
 
-    if (!gatewayToken) {
-      throw new HttpError(503, "bridge_not_configured", "OPENCLAW_GATEWAY_TOKEN nao configurado");
-    }
-
-    if (!callbackUrl) {
-      throw new HttpError(503, "bridge_not_configured", "CALLBACK_URL nao configurado");
-    }
-
     const duplicate = await this.dedupRepository.has(dedupId);
     if (duplicate) {
-      return {
-        ok: true,
-        requestId: input.requestId,
-        sessionKey,
-        reply: "duplicate_request_ignored",
-        duplicate: true,
-        callbackStatus: 200
-      };
+      if (mode === "async") {
+        return { ok: true, mode: "async", requestId: input.requestId, sessionKey, status: "accepted" };
+      }
+      return { ok: true, mode: "sync", requestId: input.requestId, sessionKey, reply: "duplicate_request_ignored" };
+    }
+
+    if (mode === "async") {
+      if (!hookToken) {
+        throw new HttpError(503, "bridge_not_configured", "OPENCLAW_TOKEN nao configurado para mode=async");
+      }
+
+      const hook = await fetch(env.OPENCLAW_HOOK_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${hookToken}`
+        },
+        body: JSON.stringify({
+          agentId: input.agentId,
+          sessionKey,
+          message: String(input.message),
+          wakeMode: "now",
+          deliver: false,
+          name: `bridge:${input.customerId}`
+        })
+      });
+
+      if (!hook.ok) {
+        const detail = await hook.text();
+        throw new HttpError(502, "hook_error", "Falha ao chamar /hooks/agent", {
+          status: hook.status,
+          detail: detail.slice(0, 1500)
+        });
+      }
+
+      await this.dedupRepository.save(dedupId);
+      return { ok: true, mode: "async", requestId: input.requestId, sessionKey, status: "accepted" };
+    }
+
+    if (!gatewayToken) {
+      throw new HttpError(503, "bridge_not_configured", "OPENCLAW_GATEWAY_TOKEN nao configurado");
     }
 
     const systemPrompt = input.systemPrompt || SYSTEM_BY_AGENT[input.agentId] || DEFAULT_SYSTEM_PROMPT;
@@ -143,26 +179,29 @@ export class MessageService {
 
     const data = (await oc.json()) as Record<string, unknown>;
     const reply = this.extractResponseText(data) || "Sem resposta.";
-    const callbackPayload = {
-      requestId: input.requestId,
-      customerId: input.customerId,
-      agentId: input.agentId,
-      sessionKey,
-      reply,
-      status: "ok",
-      timestamp: new Date().toISOString()
-    };
+    if (callbackUrl) {
+      const callbackPayload = {
+        ok: true,
+        mode: "sync",
+        requestId: input.requestId,
+        customerId: input.customerId,
+        agentId: input.agentId,
+        sessionKey,
+        reply,
+        status: "ok",
+        timestamp: new Date().toISOString()
+      };
+      await this.sendCallbackWithRetry(callbackUrl, callbackPayload, input.requestId);
+    }
 
-    const callbackStatus = await this.sendCallbackWithRetry(callbackUrl, callbackPayload, input.requestId);
     await this.dedupRepository.save(dedupId);
 
     return {
       ok: true,
+      mode: "sync",
       requestId: input.requestId,
       sessionKey,
-      reply,
-      duplicate: false,
-      callbackStatus
+      reply
     };
   }
 

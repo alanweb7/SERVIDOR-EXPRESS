@@ -11,7 +11,7 @@ export class MessageController {
     if (bridgePayload.success) {
       request.log.info({ body: bridgePayload.data }, "Inbound bridge recebido");
       const result = await this.messageService.processInboundBridge(bridgePayload.data);
-      return reply.code(200).send(result);
+      return reply.code(result.mode === "async" ? 202 : 200).send(result);
     }
 
     const payload = inboundWebhookSchema.parse(request.body);

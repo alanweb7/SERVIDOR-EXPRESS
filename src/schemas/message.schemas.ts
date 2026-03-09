@@ -13,6 +13,7 @@ export const inboundBridgeSchema = z.object({
   agentId: z.string().min(1),
   sessionKey: z.string().min(1).optional(),
   message: z.string().min(1),
+  mode: z.enum(["sync", "async"]).optional().default("sync"),
   callbackUrl: z.string().url().optional(),
   systemPrompt: z.string().min(1).optional()
 });
