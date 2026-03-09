@@ -105,6 +105,9 @@ export class MessageService {
     }
 
     const systemPrompt = input.systemPrompt || SYSTEM_BY_AGENT[input.agentId] || DEFAULT_SYSTEM_PROMPT;
+    const model = `openclaw:${input.agentId}`;
+    const user = `cust:${input.customerId}:agent:${input.agentId}`;
+
     const oc = await fetch(`${env.OPENCLAW_BASE_URL}/v1/responses`, {
       method: "POST",
       headers: {
@@ -112,14 +115,14 @@ export class MessageService {
         Authorization: `Bearer ${gatewayToken}`
       },
       body: JSON.stringify({
-        model: env.OPENCLAW_RESPONSE_MODEL,
+        model,
+        user,
         input: [
           { role: "system", content: systemPrompt },
           { role: "user", content: String(input.message) }
         ],
         metadata: {
           sessionKey,
-          user: `cust:${input.customerId}:agent:${input.agentId}`,
           agentId: input.agentId,
           requestId: input.requestId,
           customerId: input.customerId
@@ -129,6 +132,11 @@ export class MessageService {
 
     if (!oc.ok) {
       const detail = await oc.text();
+      console.error("OpenClaw /v1/responses error", {
+        status: oc.status,
+        statusText: oc.statusText,
+        body: detail
+      });
       throw new HttpError(502, "openclaw_error", "Falha ao chamar /v1/responses", {
         status: oc.status,
         detail: detail.slice(0, 1500)
