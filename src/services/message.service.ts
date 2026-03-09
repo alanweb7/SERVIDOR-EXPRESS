@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { setTimeout as sleep } from "node:timers/promises";
 import type { FastifyBaseLogger } from "fastify";
 import type { QueuePublisher } from "../adapters/queue/queue-publisher.js";
 import { env } from "../config/env.js";
@@ -6,6 +7,23 @@ import { mapInboundToAssistantPayload, extractPayloadIds } from "../integrations
 import type { MessageDedupRepository } from "../repositories/interfaces/message-dedup.repository.js";
 import type { InboundBridgeInput, InboundWebhookInput, SendMessageInput } from "../schemas/message.schemas.js";
 import { HttpError } from "../utils/http-error.js";
+
+const DEFAULT_SYSTEM_PROMPT = "Responda de forma clara e util.";
+const SYSTEM_BY_AGENT: Record<string, string> = {
+  "luna-clara":
+    "Voce e Luna Clara, especialista em Vendas e Atendimento. Responda de forma acolhedora, objetiva e persuasiva sem pressao.",
+  "edu-ben":
+    "Voce e Edu Ben, especialista em Suporte Tecnico. Responda de forma calma, tecnica e didatica, focando em diagnostico e solucao."
+};
+
+type BridgeResult = {
+  ok: boolean;
+  requestId: string;
+  sessionKey: string;
+  reply: string;
+  duplicate: boolean;
+  callbackStatus: number;
+};
 
 export class MessageService {
   constructor(
@@ -60,66 +78,85 @@ export class MessageService {
     };
   }
 
-  async processInboundBridge(
-    input: InboundBridgeInput
-  ): Promise<{ ok: boolean; requestId: string; openclawStatus: number; callbackStatus: number }> {
-    const openclawToken = (env.OPENCLAW_TOKEN || "").trim();
+  async processInboundBridge(input: InboundBridgeInput): Promise<BridgeResult> {
+    const gatewayToken = (env.OPENCLAW_GATEWAY_TOKEN || "").trim();
     const callbackUrl = (input.callbackUrl || env.CALLBACK_URL || "").trim();
+    const sessionKey = this.normalizeSessionKey(input.sessionKey, input.customerId, input.agentId);
+    const dedupId = `bridge:${input.requestId}`;
 
-    if (!openclawToken) {
-      throw new HttpError(503, "bridge_not_configured", "OPENCLAW_TOKEN nao configurado");
+    if (!gatewayToken) {
+      throw new HttpError(503, "bridge_not_configured", "OPENCLAW_GATEWAY_TOKEN nao configurado");
     }
 
     if (!callbackUrl) {
       throw new HttpError(503, "bridge_not_configured", "CALLBACK_URL nao configurado");
     }
 
-    const ocResp = await fetch(env.OPENCLAW_HOOK_URL, {
+    const duplicate = await this.dedupRepository.has(dedupId);
+    if (duplicate) {
+      return {
+        ok: true,
+        requestId: input.requestId,
+        sessionKey,
+        reply: "duplicate_request_ignored",
+        duplicate: true,
+        callbackStatus: 200
+      };
+    }
+
+    const systemPrompt = input.systemPrompt || SYSTEM_BY_AGENT[input.agentId] || DEFAULT_SYSTEM_PROMPT;
+    const oc = await fetch(`${env.OPENCLAW_BASE_URL}/v1/responses`, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${openclawToken}`,
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${gatewayToken}`
       },
       body: JSON.stringify({
-        agentId: input.agentId,
-        sessionKey: input.sessionKey,
-        message: input.message,
-        wakeMode: "now",
-        deliver: false,
-        name: `bridge:${input.customerId || "unknown"}`
+        model: env.OPENCLAW_RESPONSE_MODEL,
+        input: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: String(input.message) }
+        ],
+        metadata: {
+          sessionKey,
+          user: `cust:${input.customerId}:agent:${input.agentId}`,
+          agentId: input.agentId,
+          requestId: input.requestId,
+          customerId: input.customerId
+        }
       })
     });
 
-    if (!ocResp.ok) {
-      const detail = await ocResp.text();
-      throw new HttpError(502, "openclaw_error", "Falha ao chamar hook OpenClaw", {
-        status: ocResp.status,
+    if (!oc.ok) {
+      const detail = await oc.text();
+      throw new HttpError(502, "openclaw_error", "Falha ao chamar /v1/responses", {
+        status: oc.status,
         detail: detail.slice(0, 1500)
       });
     }
 
-    const cbResp = await fetch(callbackUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        requestId: input.requestId,
-        reply: "Recebi sua mensagem e ja estou processando ✅"
-      })
-    });
+    const data = (await oc.json()) as Record<string, unknown>;
+    const reply = this.extractResponseText(data) || "Sem resposta.";
+    const callbackPayload = {
+      requestId: input.requestId,
+      customerId: input.customerId,
+      agentId: input.agentId,
+      sessionKey,
+      reply,
+      status: "ok",
+      timestamp: new Date().toISOString()
+    };
 
-    if (!cbResp.ok) {
-      const detail = await cbResp.text();
-      throw new HttpError(502, "callback_error", "Falha ao chamar callback", {
-        status: cbResp.status,
-        detail: detail.slice(0, 1500)
-      });
-    }
+    const callbackStatus = await this.sendCallbackWithRetry(callbackUrl, callbackPayload, input.requestId);
+    await this.dedupRepository.save(dedupId);
 
     return {
       ok: true,
       requestId: input.requestId,
-      openclawStatus: ocResp.status,
-      callbackStatus: cbResp.status
+      sessionKey,
+      reply,
+      duplicate: false,
+      callbackStatus
     };
   }
 
@@ -131,5 +168,90 @@ export class MessageService {
     });
 
     return { queued: true, messageId };
+  }
+
+  private normalizeSessionKey(sessionKey: string | undefined, customerId: string, agentId: string): string {
+    const cleaned = (sessionKey || "").trim();
+    if (cleaned) {
+      if (cleaned.startsWith("cust:") || cleaned.startsWith("hook:")) {
+        return cleaned;
+      }
+      return `cust:${cleaned}`;
+    }
+    return `cust:${customerId}:agent:${agentId}`;
+  }
+
+  private extractResponseText(data: Record<string, unknown>): string {
+    const direct = typeof data.output_text === "string" ? data.output_text.trim() : "";
+    if (direct) return direct;
+
+    const output = data.output;
+    if (!Array.isArray(output)) return "";
+
+    const chunks: string[] = [];
+    for (const item of output) {
+      if (!item || typeof item !== "object") continue;
+      const content = (item as { content?: unknown }).content;
+      if (!Array.isArray(content)) continue;
+      for (const part of content) {
+        if (!part || typeof part !== "object") continue;
+        const textValue = (part as { text?: unknown; value?: unknown }).text;
+        if (typeof textValue === "string" && textValue.trim()) {
+          chunks.push(textValue.trim());
+          continue;
+        }
+        const value = (part as { value?: unknown }).value;
+        if (typeof value === "string" && value.trim()) {
+          chunks.push(value.trim());
+        }
+      }
+    }
+    return chunks.join(" ").trim();
+  }
+
+  private async sendCallbackWithRetry(url: string, payload: Record<string, unknown>, requestId: string): Promise<number> {
+    const maxAttempts = 3;
+    let lastStatus = 0;
+    let lastDetail = "";
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": requestId
+        },
+        body: JSON.stringify(payload)
+      }).catch((error: unknown) => {
+        lastDetail = error instanceof Error ? error.message : String(error);
+        return null;
+      });
+
+      if (response && response.ok) {
+        return response.status;
+      }
+
+      if (response) {
+        lastStatus = response.status;
+        lastDetail = (await response.text()).slice(0, 1500);
+      }
+
+      if (attempt < maxAttempts) {
+        await sleep(500 * 2 ** (attempt - 1));
+      }
+    }
+
+    await this.queuePublisher.publish("bridge.callback.failed", {
+      requestId,
+      callbackUrl: url,
+      status: lastStatus,
+      detail: lastDetail
+    });
+
+    throw new HttpError(502, "callback_error", "Falha ao chamar callback apos retries", {
+      requestId,
+      status: lastStatus,
+      detail: lastDetail
+    });
   }
 }
