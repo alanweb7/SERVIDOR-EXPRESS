@@ -17,6 +17,7 @@ Ele ja esta preparado com:
 - healthcheck
 - estrategia de update/rollback
 - mount do Docker socket (`/var/run/docker.sock`) para fallback Docker CLI
+- volume persistente de identidade WS (`/app/.openclaw`)
 - transporte OpenClaw em `ws` fixo no exemplo (`OPENCLAW_AGENT_TRANSPORT=ws`)
 - fallback Docker desativado no exemplo (`OPENCLAW_AGENT_DOCKER_FALLBACK=false`)
 
@@ -70,6 +71,17 @@ Notas:
 - Se a imagem GHCR for privada, configure credencial de registry no Portainer.
 - Para usar tag imutavel, troque em `image:` de `latest` para `sha-<commit>`.
 - O `docker-compose.yml` atual permanece inalterado e funcional.
+- Mantenha `OPENCLAW_DEVICE_ID` estavel e `replicas: 1` para evitar `device identity mismatch`.
+
+## Se ocorrer "device identity mismatch"
+
+1. Garanta `OPENCLAW_DEVICE_ID` fixo (ex.: `api-organix-prod-1`).
+2. Mantenha o volume `api_openclaw_identity:/app/.openclaw`.
+3. Se ja houver mismatch, redefina identidade:
+   - pare a stack
+   - remova o arquivo antigo `device-identity.json` dentro do volume
+   - suba a stack novamente
+   - refaca o pareamento do device no gateway OpenClaw, se necessario
 
 
 ## Bloco de exemplo
