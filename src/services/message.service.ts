@@ -101,6 +101,7 @@ export class MessageService {
 
   async processInboundBridge(input: InboundBridgeInput): Promise<BridgeResult> {
     const mode = input.mode ?? "sync";
+    const payloadCallbackUrl = (input.callbackUrl || "").trim();
     const callbackUrl = (input.callbackUrl || env.CALLBACK_URL || "").trim();
     const sessionKey = this.normalizeSessionKey(input.sessionKey, input.customerId, input.agentId);
     const systemPrompt = input.systemPrompt || SYSTEM_BY_AGENT[input.agentId] || DEFAULT_SYSTEM_PROMPT;
@@ -145,9 +146,9 @@ export class MessageService {
       message: String(input.message)
     });
 
-    if (callbackUrl) {
+    if (payloadCallbackUrl) {
       await this.sendCallbackWithRetry(
-        callbackUrl,
+        payloadCallbackUrl,
         {
           requestId: input.requestId,
           customerId: input.customerId,
