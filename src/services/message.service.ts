@@ -180,7 +180,7 @@ export class MessageService {
     if (!job) return;
 
     try {
-      const reply = await this.requestOpenClawResponse(job);
+      const reply = await this.requestOpenClawResponseWithRetry(job);
       await this.sendCallbackWithRetry(
         job.callbackUrl,
         {
@@ -261,6 +261,49 @@ export class MessageService {
 
     const data = (await oc.json()) as Record<string, unknown>;
     return this.extractResponseText(data) || "Sem resposta.";
+  }
+
+  private async requestOpenClawResponseWithRetry(input: {
+    requestId: string;
+    customerId: string;
+    agentId: string;
+    sessionKey: string;
+    systemPrompt: string;
+    message: string;
+  }): Promise<string> {
+    const maxAttempts = 3;
+    const delays = [500, 1000, 2000];
+    let lastError: unknown = null;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      try {
+        return await this.requestOpenClawResponse(input);
+      } catch (error) {
+        lastError = error;
+
+        const isRetryable = this.isRetryableOpenClawError(error);
+        if (!isRetryable || attempt === maxAttempts) {
+          throw error;
+        }
+
+        await sleep(delays[attempt - 1]);
+      }
+    }
+
+    throw lastError instanceof Error ? lastError : new Error(String(lastError));
+  }
+
+  private isRetryableOpenClawError(error: unknown): boolean {
+    if (!(error instanceof HttpError)) {
+      return true;
+    }
+
+    if (error.code !== "openclaw_error") {
+      return false;
+    }
+
+    const cause = (error.cause || {}) as { status?: number };
+    return cause.status === 429 || cause.status === 502 || cause.status === 503 || cause.status === 504;
   }
 
   private normalizeSessionKey(sessionKey: string | undefined, customerId: string, agentId: string): string {
