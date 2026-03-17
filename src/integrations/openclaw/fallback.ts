@@ -23,6 +23,8 @@ export type OpenClawFallbackInput = {
   sessionKey: string;
   message: string;
   idempotencyKey: string;
+  metadata?: Record<string, unknown>;
+  trustedInboundMeta?: Record<string, unknown>;
 };
 
 export type OpenClawFallbackOutput = {
@@ -42,7 +44,14 @@ export class OpenClawFallbackCliExecutor {
     const params = JSON.stringify({
       sessionKey: input.sessionKey,
       message: input.message,
-      idempotencyKey: input.idempotencyKey
+      idempotencyKey: input.idempotencyKey,
+      ...(input.metadata ? { metadata: input.metadata } : {}),
+      ...(input.trustedInboundMeta
+        ? {
+            inbound_meta: input.trustedInboundMeta,
+            inboundMeta: input.trustedInboundMeta,
+          }
+        : {})
     });
 
     try {
@@ -94,4 +103,3 @@ export class OpenClawFallbackCliExecutor {
     return typeof value === "string" ? value : null;
   }
 }
-

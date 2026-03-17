@@ -4,7 +4,17 @@ export const openClawAgentSendSchema = z.object({
   message: z.string().min(1),
   sessionId: z.string().min(1).optional(),
   agent: z.string().min(1).optional(),
-  container: z.string().min(1).optional()
+  container: z.string().min(1).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+  trustedInboundMeta: z
+    .object({
+      schema: z.literal("openclaw.inbound_meta.v1"),
+      channel: z.string().min(1),
+      provider: z.string().min(1),
+      surface: z.string().min(1),
+      chat_type: z.enum(["direct", "group"])
+    })
+    .optional()
 });
 
 export const openClawWebhookSendSchema = z.object({

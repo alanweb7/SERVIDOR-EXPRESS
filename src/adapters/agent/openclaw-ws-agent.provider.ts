@@ -43,7 +43,9 @@ export class OpenClawWsAgentProvider implements OpenClawAgentProvider {
       const response = await this.options.gatewayClient.sendChat({
         sessionKey: mapped.sessionKey,
         message: mapped.message,
-        idempotencyKey: mapped.idempotencyKey
+        idempotencyKey: mapped.idempotencyKey,
+        metadata: mapped.metadata,
+        trustedInboundMeta: mapped.trustedInboundMeta
       });
 
       return {
@@ -64,7 +66,9 @@ export class OpenClawWsAgentProvider implements OpenClawAgentProvider {
           const fallbackResult = await fallback.sendChat({
             sessionKey: mapped.sessionKey,
             message: mapped.message,
-            idempotencyKey: mapped.idempotencyKey
+            idempotencyKey: mapped.idempotencyKey,
+            metadata: mapped.metadata,
+            trustedInboundMeta: mapped.trustedInboundMeta
           });
           return {
             replyText: "",

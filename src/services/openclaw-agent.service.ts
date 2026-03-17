@@ -33,7 +33,7 @@ export class OpenClawAgentService {
 
     if (transport === "ws" || transport === "auto") {
       try {
-        return await this.sendViaWs(sessionId, message, agent, container);
+        return await this.sendViaWs(sessionId, message, agent, container, input.metadata, input.trustedInboundMeta);
       } catch (error) {
         const canFallbackDocker = transport === "auto" || env.OPENCLAW_AGENT_DOCKER_FALLBACK;
         if (!canFallbackDocker) {
@@ -59,7 +59,9 @@ export class OpenClawAgentService {
     sessionId: string,
     message: string,
     agent: string | null,
-    container: string
+    container: string,
+    metadata?: Record<string, unknown>,
+    trustedInboundMeta?: Record<string, unknown>
   ): Promise<OpenClawAgentSendResult> {
     if (!env.OPENCLAW_GATEWAY_URL || !env.OPENCLAW_GATEWAY_TOKEN) {
       throw new HttpError(
@@ -85,7 +87,9 @@ export class OpenClawAgentService {
         sessionKey: sessionId,
         message,
         idempotencyKey: randomUUID(),
-        agentId: agent ?? undefined
+        agentId: agent ?? undefined,
+        metadata,
+        trustedInboundMeta
       });
 
       const openclawPayload: Record<string, unknown> = {

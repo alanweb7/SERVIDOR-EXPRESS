@@ -120,12 +120,75 @@ export class OpenClawAgentController {
       throw new HttpError(422, "VALIDATION_ERROR", "message nao pode ser vazio");
     }
 
+    const trustedInboundMeta = this.buildTrustedInboundMeta(payload);
+
     return {
       message,
       container: payload.container,
       agent: payload.agent ?? env.OPENCLAW_WEBHOOK_AGENT,
-      sessionId: this.resolveWebhookSessionId(payload)
+      sessionId: this.resolveWebhookSessionId(payload),
+      trustedInboundMeta,
+      metadata: {
+        ...trustedInboundMeta,
+        source_message_id: payload.message_id ?? null,
+        source_timestamp: payload.timestamp ?? null,
+        sender_user_id: payload.user_id ?? null,
+        remote_jid: payload.metadata?.raw_event
+          ? this.readRemoteJid(payload.metadata.raw_event)
+          : null,
+        provider_instance: payload.metadata?.instance ?? null,
+      }
     };
+  }
+
+  private buildTrustedInboundMeta(payload: OpenClawWebhookSendInput) {
+    const channel = this.normalizeChannel(payload.channel);
+    const chatType = this.detectChatType(payload);
+
+    return {
+      schema: "openclaw.inbound_meta.v1" as const,
+      channel,
+      provider: channel,
+      surface: channel,
+      chat_type: chatType,
+    };
+  }
+
+  private normalizeChannel(raw: string | undefined): string {
+    const value = (raw || "").trim().toLowerCase();
+    if (value.includes("whats")) return "whatsapp";
+    if (value.includes("telegram")) return "telegram";
+    if (value.includes("discord")) return "discord";
+    if (value.includes("instagram")) return "instagram";
+    if (value.includes("web")) return "webchat";
+    if (value.includes("internal")) return "webchat";
+    return "webchat";
+  }
+
+  private detectChatType(payload: OpenClawWebhookSendInput): "direct" | "group" {
+    const jid = (
+      (payload.metadata?.raw_event && this.readRemoteJid(payload.metadata.raw_event)) ||
+      payload.user_id ||
+      ""
+    )
+      .trim()
+      .toLowerCase();
+
+    if (jid.endsWith("@g.us")) return "group";
+    return "direct";
+  }
+
+  private readRemoteJid(rawEvent: Record<string, unknown>): string | null {
+    const body = this.asRecord(rawEvent.body);
+    const data = this.asRecord(body?.data);
+    const key = this.asRecord(data?.key);
+    const remoteJid = key?.remoteJid;
+    return typeof remoteJid === "string" && remoteJid.trim().length > 0 ? remoteJid.trim() : null;
+  }
+
+  private asRecord(value: unknown): Record<string, unknown> | null {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    return value as Record<string, unknown>;
   }
 
   private resolveWebhookSessionId(payload: OpenClawWebhookSendInput): string {

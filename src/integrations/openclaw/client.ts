@@ -37,6 +37,8 @@ export type SendChatInput = {
   message: string;
   idempotencyKey: string;
   agentId?: string;
+  metadata?: Record<string, unknown>;
+  trustedInboundMeta?: Record<string, unknown>;
 };
 
 export type SendChatOutput = {
@@ -81,7 +83,14 @@ export class OpenClawClient {
       sessionKey: input.sessionKey,
       message: input.message,
       idempotencyKey: input.idempotencyKey,
-      ...(input.agentId ? { agentId: input.agentId, agent: input.agentId } : {})
+      ...(input.agentId ? { agentId: input.agentId, agent: input.agentId } : {}),
+      ...(input.metadata ? { metadata: input.metadata } : {}),
+      ...(input.trustedInboundMeta
+        ? {
+            inbound_meta: input.trustedInboundMeta,
+            inboundMeta: input.trustedInboundMeta,
+          }
+        : {})
     });
 
     const response = await this.waitForFrame(
