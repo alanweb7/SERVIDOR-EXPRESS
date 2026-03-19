@@ -245,3 +245,38 @@ Callback de falha:
   }
 }
 ```
+```json
+{
+    "mode": "sync",
+    "requestId": "async-{{nonce}}",
+    "agentId": "main",
+    "session_id": "agent:main:main",
+    "timestamp": "2026-03-18T22:22:00.000Z",
+    "payload": {
+    "channel": "n8n",
+    "message": "",
+    "message_type":"text",
+    "message_id": "{{nonce}}",
+    "message":"teste ws chat.send",
+    "timestamp": "2026-03-18T22:22:00.000Z",
+    	"customerId": "evo:591983763092",
+    	"user_id": "evo:5591983763092",
+    	"channel": "n8n",
+        "provider": "evolution",
+        "instance": "instancia01",
+        "raw_event": {},
+    "media": {
+        "url": "https://upload.wikimedia.org/wikipedia/pt/9/98/Cebolinha.png",
+        "mime_type": "image/jpeg",
+        "caption": "Veja esta image",
+        "filename": "casa.jpg",
+        "duration_sec": null
+    },
+    "sender": {
+        "label": "evolution",
+        "id": "123",
+        "raw_event": {}
+    }
+    }
+}
+```
