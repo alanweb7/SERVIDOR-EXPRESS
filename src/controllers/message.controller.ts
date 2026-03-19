@@ -13,7 +13,15 @@ export class MessageController {
         : (request.body as Record<string, unknown>);
 
     const rawPayload = normalizedBody?.payload;
-    if (rawPayload && typeof rawPayload === "object" && !Array.isArray(rawPayload)) {
+    const rawMessage = typeof normalizedBody?.message === "string" ? normalizedBody.message.trim() : "";
+    const isSlashNewCommand = rawMessage === "/new";
+
+    if (
+      rawPayload &&
+      typeof rawPayload === "object" &&
+      !Array.isArray(rawPayload) &&
+      !isSlashNewCommand
+    ) {
       normalizedBody.message = JSON.stringify(rawPayload);
     }
 
