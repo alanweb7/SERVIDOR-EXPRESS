@@ -46,6 +46,7 @@ type AsyncBridgeJob = {
 
 export class MessageService {
   private readonly asyncJobs = new Map<string, AsyncBridgeJob>();
+  private readonly bridgeSessionMemory = new Map<string, string>();
 
   constructor(
     private readonly dedupRepository: MessageDedupRepository,
@@ -103,7 +104,13 @@ export class MessageService {
     const mode = input.mode ?? "sync";
     const payloadCallbackUrl = (input.callbackUrl || "").trim();
     const callbackUrl = (input.callbackUrl || env.CALLBACK_URL || "").trim();
-    const sessionKey = this.normalizeSessionKey(input.sessionKey, input.customerId, input.agentId);
+    const isNewSessionCommand = this.isNewSessionCommand(input.message);
+    const sessionKey = this.resolveBridgeSessionKey(
+      input.sessionKey,
+      input.customerId,
+      input.agentId,
+      isNewSessionCommand
+    );
     const systemPrompt = input.systemPrompt || SYSTEM_BY_AGENT[input.agentId] || DEFAULT_SYSTEM_PROMPT;
     const dedupId = `bridge:${input.requestId}`;
 
@@ -113,6 +120,36 @@ export class MessageService {
         return { ok: true, mode: "async", requestId: input.requestId, sessionKey, status: "accepted" };
       }
       return { ok: true, mode: "sync", requestId: input.requestId, sessionKey, reply: "duplicate_request_ignored" };
+    }
+
+    if (isNewSessionCommand) {
+      const commandReply = "new_session_started";
+
+      if (mode === "async") {
+        if (!callbackUrl) {
+          throw new HttpError(422, "VALIDATION_ERROR", "callbackUrl e obrigatorio quando mode=async");
+        }
+
+        await this.sendCallbackWithRetry(
+          callbackUrl,
+          {
+            requestId: input.requestId,
+            customerId: input.customerId,
+            agentId: input.agentId,
+            sessionKey,
+            status: "ok",
+            reply: commandReply,
+            timestamp: new Date().toISOString()
+          },
+          input.requestId
+        );
+
+        await this.dedupRepository.save(dedupId);
+        return { ok: true, mode: "async", requestId: input.requestId, sessionKey, status: "accepted" };
+      }
+
+      await this.dedupRepository.save(dedupId);
+      return { ok: true, mode: "sync", requestId: input.requestId, sessionKey, reply: commandReply };
     }
 
     if (mode === "async") {
@@ -316,6 +353,39 @@ export class MessageService {
       return `cust:${cleaned}`;
     }
     return `cust:${customerId}:agent:${agentId}`;
+  }
+
+  private resolveBridgeSessionKey(
+    sessionKey: string | undefined,
+    customerId: string,
+    agentId: string,
+    reset: boolean
+  ): string {
+    const memoryKey = `${customerId}:${agentId}`;
+
+    if (reset) {
+      const next = `cust:${customerId}:agent:${agentId}:s:${Date.now()}`;
+      this.bridgeSessionMemory.set(memoryKey, next);
+      return next;
+    }
+
+    const explicit = (sessionKey || "").trim();
+    if (explicit) {
+      const normalized = this.normalizeSessionKey(explicit, customerId, agentId);
+      this.bridgeSessionMemory.set(memoryKey, normalized);
+      return normalized;
+    }
+
+    const remembered = this.bridgeSessionMemory.get(memoryKey);
+    if (remembered) return remembered;
+
+    const fallback = this.normalizeSessionKey(undefined, customerId, agentId);
+    this.bridgeSessionMemory.set(memoryKey, fallback);
+    return fallback;
+  }
+
+  private isNewSessionCommand(value: string): boolean {
+    return value.trim() === "/new";
   }
 
   private extractResponseText(data: Record<string, unknown>): string {
